@@ -137,3 +137,21 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
   - `npm run lint`: pass
   - `npm run build`: pass
   - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-controls.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass
+
+- Mobile swipe controls hotfix (post-deploy bug report):
+  - Root-cause: input controller handled only Touch Events; some mobile browsers route primary gestures through Pointer Events for touch.
+  - Added pointer-touch regression in `e2e/mobile-controls.spec.ts`:
+    - `rhythm serpent applies pointer-touch swipe turns before pointerup`.
+  - Updated `createInputController` in `src/main.ts`:
+    - introduced shared gesture helpers (`beginTouchGesture`, `moveTouchGesture`, `endTouchGesture`).
+    - added Pointer Events path (`pointerdown/move/up/cancel`) for `touch` and `pen` pointers.
+    - retained Touch Events as fallback for non-pointer browsers.
+    - preserved swipe queue behavior and tap/hold semantics.
+  - Added `touch-action: none;` directly on `#game-canvas` to ensure gesture ownership on mobile.
+  - Updated touch-based E2E to skip when Pointer Events are present (touch path is fallback-only in that environment).
+- Verification (fresh after hotfix):
+  - `npm run test:e2e -- e2e/mobile-controls.spec.ts`: pass (with fallback test skipped when pointer primary)
+  - `npm run test`: pass
+  - `npm run lint`: pass
+  - `npm run build`: pass
+  - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-controls.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (7 passed, 1 skipped)

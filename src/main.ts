@@ -1908,6 +1908,7 @@ function createInputController(target: HTMLCanvasElement) {
   let touchStartY = 0;
   let touchStartedAt = 0;
   let touchMoved = false;
+  let activePointerId: number | null = null;
   let activeStage: StageId = "rhythm-serpent";
   let bounds = target.getBoundingClientRect();
 
@@ -1932,62 +1933,50 @@ function createInputController(target: HTMLCanvasElement) {
     }
   });
 
-  target.addEventListener("touchstart", (event) => {
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-    const touch = event.changedTouches[0];
-    touchStartX = touch.clientX;
-    touchStartY = touch.clientY;
+  const beginTouchGesture = (clientX: number, clientY: number) => {
+    touchStartX = clientX;
+    touchStartY = clientY;
     touchStartedAt = performance.now();
     touchMoved = false;
     actionHeld = true;
     refreshBounds();
     const profile = getMobileInputProfile(activeStage);
-    steerX = normalizeSteerX(touch.clientX, bounds.left, bounds.width, profile);
-  }, { passive: false });
+    steerX = normalizeSteerX(clientX, bounds.left, bounds.width, profile);
+  };
 
-  target.addEventListener("touchmove", (event) => {
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-    const touch = event.changedTouches[0];
-    const dx = touch.clientX - touchStartX;
-    const dy = touch.clientY - touchStartY;
+  const moveTouchGesture = (clientX: number, clientY: number) => {
+    const dx = clientX - touchStartX;
+    const dy = clientY - touchStartY;
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
       touchMoved = true;
     }
     const profile = getMobileInputProfile(activeStage);
-    steerX = normalizeSteerX(touch.clientX, bounds.left, bounds.width, profile);
+    steerX = normalizeSteerX(clientX, bounds.left, bounds.width, profile);
     const moveGesture = classifyTouchGesture({
       startX: touchStartX,
       startY: touchStartY,
-      endX: touch.clientX,
-      endY: touch.clientY,
+      endX: clientX,
+      endY: clientY,
       durationMs: performance.now() - touchStartedAt,
       touchMoved,
       profile
     });
     if (moveGesture.kind === "swipe") {
       swipeQueue.push(moveGesture.dir);
-      touchStartX = touch.clientX;
-      touchStartY = touch.clientY;
+      touchStartX = clientX;
+      touchStartY = clientY;
       touchStartedAt = performance.now();
       touchMoved = false;
     }
-  }, { passive: false });
+  };
 
-  target.addEventListener("touchend", (event) => {
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-    const touch = event.changedTouches[0];
+  const endTouchGesture = (clientX: number, clientY: number) => {
     const profile = getMobileInputProfile(activeStage);
     const gesture = classifyTouchGesture({
       startX: touchStartX,
       startY: touchStartY,
-      endX: touch.clientX,
-      endY: touch.clientY,
+      endX: clientX,
+      endY: clientY,
       durationMs: performance.now() - touchStartedAt,
       touchMoved,
       profile
@@ -1999,12 +1988,108 @@ function createInputController(target: HTMLCanvasElement) {
     }
     actionHeld = false;
     steerX = 0;
-  }, { passive: false });
+    touchMoved = false;
+  };
 
-  target.addEventListener("touchcancel", () => {
+  const cancelTouchGesture = () => {
     actionHeld = false;
     steerX = 0;
-  }, { passive: true });
+    touchMoved = false;
+  };
+
+  const supportsPointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
+  if (supportsPointerEvents) {
+    target.addEventListener("pointerdown", (event) => {
+      if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+        return;
+      }
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      activePointerId = event.pointerId;
+      target.setPointerCapture(event.pointerId);
+      beginTouchGesture(event.clientX, event.clientY);
+    }, { passive: false });
+
+    target.addEventListener("pointermove", (event) => {
+      if (activePointerId === null || event.pointerId !== activePointerId) {
+        return;
+      }
+      if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+        return;
+      }
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      moveTouchGesture(event.clientX, event.clientY);
+    }, { passive: false });
+
+    target.addEventListener("pointerup", (event) => {
+      if (activePointerId === null || event.pointerId !== activePointerId) {
+        return;
+      }
+      if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+        return;
+      }
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      endTouchGesture(event.clientX, event.clientY);
+      if (target.hasPointerCapture(event.pointerId)) {
+        target.releasePointerCapture(event.pointerId);
+      }
+      activePointerId = null;
+    }, { passive: false });
+
+    target.addEventListener("pointercancel", (event) => {
+      if (activePointerId === null || event.pointerId !== activePointerId) {
+        return;
+      }
+      cancelTouchGesture();
+      if (target.hasPointerCapture(event.pointerId)) {
+        target.releasePointerCapture(event.pointerId);
+      }
+      activePointerId = null;
+    }, { passive: true });
+  } else {
+    target.addEventListener("touchstart", (event) => {
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      const touch = event.changedTouches[0];
+      if (!touch) {
+        return;
+      }
+      beginTouchGesture(touch.clientX, touch.clientY);
+    }, { passive: false });
+
+    target.addEventListener("touchmove", (event) => {
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      const touch = event.changedTouches[0];
+      if (!touch) {
+        return;
+      }
+      moveTouchGesture(touch.clientX, touch.clientY);
+    }, { passive: false });
+
+    target.addEventListener("touchend", (event) => {
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      const touch = event.changedTouches[0];
+      if (!touch) {
+        cancelTouchGesture();
+        return;
+      }
+      endTouchGesture(touch.clientX, touch.clientY);
+    }, { passive: false });
+
+    target.addEventListener("touchcancel", () => {
+      cancelTouchGesture();
+    }, { passive: true });
+  }
 
   window.addEventListener("resize", refreshBounds, { passive: true });
   window.addEventListener("orientationchange", refreshBounds);
@@ -2367,6 +2452,7 @@ function injectStyles(): void {
       height: 100%;
       display: block;
       image-rendering: pixelated;
+      touch-action: none;
     }
     .overlay {
       position: absolute;
