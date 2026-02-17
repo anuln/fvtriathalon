@@ -1,5 +1,6 @@
 import { toTriPoints } from "./domain/scoring";
 import { getStageBeatPulse } from "./domain/beatPulse";
+import { computeRhythmSerpentGrid } from "./domain/rhythmSerpentLayout";
 import {
   classifyTouchGesture,
   getMobileInputProfile,
@@ -614,19 +615,23 @@ function createStage(index: number): StageRuntime {
 }
 
 function createRhythmSerpentStage(): StageRuntime {
-  const cols = 24;
-  const rows = 16;
+  const grid = computeRhythmSerpentGrid(window.innerWidth, window.innerHeight);
+  const cols = grid.cols;
+  const rows = grid.rows;
   const instrumentIcons = ["🎸", "🎹", "🥁", "🎷", "🎺", "🎻"] as const;
+  const spawnX = Math.max(2, Math.floor(cols * 0.5));
+  const spawnY = Math.max(2, Math.floor(rows * 0.5));
   const snake: Array<{ x: number; y: number }> = [
-    { x: 8, y: 8 },
-    { x: 7, y: 8 },
-    { x: 6, y: 8 }
+    { x: spawnX, y: spawnY },
+    { x: spawnX - 1, y: spawnY },
+    { x: spawnX - 2, y: spawnY }
   ];
   let dir: Dir = "right";
   let moveMs = 0;
   let stageMs = 0;
   let score = 0;
   let dead = false;
+  let openingGraceMs = 5500;
   let combo = 0;
   let comboTimerMs = 0;
   let food = randomGridPoint(cols, rows);
@@ -681,6 +686,7 @@ function createRhythmSerpentStage(): StageRuntime {
         return;
       }
       stageMs += dtMs;
+      openingGraceMs = Math.max(0, openingGraceMs - dtMs);
 
       const swipe = input.consumeSwipe();
       if (swipe && !isOppositeDirection(dir, swipe)) {
@@ -720,12 +726,12 @@ function createRhythmSerpentStage(): StageRuntime {
 
         const hitsWall = next.x < 0 || next.y < 0 || next.x >= cols || next.y >= rows;
         const hitsSelf = snake.some((segment) => segment.x === next.x && segment.y === next.y);
-        if ((hitsWall || hitsSelf) && timers.encoreMs <= 0) {
+        if ((hitsWall || hitsSelf) && timers.encoreMs <= 0 && openingGraceMs <= 0) {
           dead = true;
           return;
         }
 
-        if (hitsWall && timers.encoreMs > 0) {
+        if (hitsWall && (timers.encoreMs > 0 || openingGraceMs > 0)) {
           next.x = (next.x + cols) % cols;
           next.y = (next.y + rows) % rows;
         }
@@ -1074,6 +1080,8 @@ function createRhythmSerpentStage(): StageRuntime {
     },
     debugState() {
       return {
+        currentDir: dir,
+        grid: { cols, rows },
         combo,
         snakeLength: snake.length,
         powerActive: { ...timers }
@@ -1925,6 +1933,9 @@ function createInputController(target: HTMLCanvasElement) {
   });
 
   target.addEventListener("touchstart", (event) => {
+    if (event.cancelable) {
+      event.preventDefault();
+    }
     const touch = event.changedTouches[0];
     touchStartX = touch.clientX;
     touchStartY = touch.clientY;
@@ -1934,9 +1945,12 @@ function createInputController(target: HTMLCanvasElement) {
     refreshBounds();
     const profile = getMobileInputProfile(activeStage);
     steerX = normalizeSteerX(touch.clientX, bounds.left, bounds.width, profile);
-  }, { passive: true });
+  }, { passive: false });
 
   target.addEventListener("touchmove", (event) => {
+    if (event.cancelable) {
+      event.preventDefault();
+    }
     const touch = event.changedTouches[0];
     const dx = touch.clientX - touchStartX;
     const dy = touch.clientY - touchStartY;
@@ -1945,9 +1959,28 @@ function createInputController(target: HTMLCanvasElement) {
     }
     const profile = getMobileInputProfile(activeStage);
     steerX = normalizeSteerX(touch.clientX, bounds.left, bounds.width, profile);
-  }, { passive: true });
+    const moveGesture = classifyTouchGesture({
+      startX: touchStartX,
+      startY: touchStartY,
+      endX: touch.clientX,
+      endY: touch.clientY,
+      durationMs: performance.now() - touchStartedAt,
+      touchMoved,
+      profile
+    });
+    if (moveGesture.kind === "swipe") {
+      swipeQueue.push(moveGesture.dir);
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      touchStartedAt = performance.now();
+      touchMoved = false;
+    }
+  }, { passive: false });
 
   target.addEventListener("touchend", (event) => {
+    if (event.cancelable) {
+      event.preventDefault();
+    }
     const touch = event.changedTouches[0];
     const profile = getMobileInputProfile(activeStage);
     const gesture = classifyTouchGesture({
@@ -1966,7 +1999,7 @@ function createInputController(target: HTMLCanvasElement) {
     }
     actionHeld = false;
     steerX = 0;
-  }, { passive: true });
+  }, { passive: false });
 
   target.addEventListener("touchcancel", () => {
     actionHeld = false;
@@ -2267,8 +2300,9 @@ function injectStyles(): void {
     }
     html, body, #app {
       margin: 0;
-      width: 100%;
-      height: 100%;
+      width: 100vw;
+      height: 100vh;
+      min-height: 100vh;
       min-height: 100dvh;
       background: var(--bg);
       color: var(--text);
@@ -2278,8 +2312,13 @@ function injectStyles(): void {
       overscroll-behavior: none;
     }
     .tri-root {
-      width: 100%;
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      min-height: 100vh;
       height: 100dvh;
+      min-height: 100dvh;
       display: grid;
       grid-template-rows: var(--hud-h) minmax(0, 1fr) var(--rail-h);
       gap: max(4px, calc(var(--gutter) - 2px));
@@ -2320,6 +2359,7 @@ function injectStyles(): void {
       overflow: hidden;
       border: 1px solid rgba(255, 255, 255, 0.16);
       background: color-mix(in srgb, var(--surface) 82%, black 18%);
+      height: 100%;
       min-height: 0;
     }
     #game-canvas {

@@ -109,3 +109,31 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
     - `npm run test`: pass
     - `npm run lint`: pass
     - `npm run build`: pass
+
+- Mobile compatibility patch (Rhythm Serpent swipe + full-screen portrait fit):
+  - Added test-first coverage for portrait playfield sizing:
+    - `tests/domain/rhythmSerpentLayout.test.ts`
+    - new layout domain helper `src/domain/rhythmSerpentLayout.ts`
+  - Added test-first mobile control regression E2E:
+    - `e2e/mobile-controls.spec.ts`
+    - validates swipe direction changes before `touchend`
+    - validates portrait grid height occupancy against canvas
+  - Updated `createInputController` in `src/main.ts`:
+    - touch listeners now run with `{ passive: false }` and call `preventDefault()`
+    - swipe gestures are now classified during `touchmove` (not only `touchend`)
+    - move-based swipe queue supports chained thumb swipes on mobile
+  - Updated Rhythm Serpent stage in `src/main.ts`:
+    - portrait-aware grid selection via `computeRhythmSerpentGrid(...)`
+    - `debugState` now includes `currentDir` + `grid` for deterministic E2E checks
+    - added short opening grace window to prevent immediate idle death on narrow portrait grids
+  - Updated mobile shell sizing in `src/main.ts` CSS injection:
+    - `vh` + `dvh` fallback sizing
+    - fixed full-viewport `.tri-root` shell
+    - `.canvas-wrap` forced to full row height
+- Verification (fresh after mobile compatibility patch):
+  - `npm run test -- tests/domain/rhythmSerpentLayout.test.ts tests/domain/mobileInputProfile.test.ts`: pass
+  - `npm run test:e2e -- e2e/mobile-controls.spec.ts`: pass
+  - `npm run test`: pass
+  - `npm run lint`: pass
+  - `npm run build`: pass
+  - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-controls.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass
