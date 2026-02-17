@@ -1,0 +1,111 @@
+Original prompt: Yes, I want to build the whole game and have it be running. Let's wire everything in.
+
+- Loaded skills: brainstorming, test-driven-development, develop-web-game.
+- Confirmed current app is scaffold only; gameplay modules exist but were not wired into runtime.
+- Next: replace src/main.ts with full playable triathlon runtime, global clock, stage transitions, retry/commit flow, theme switching, and leaderboard integration.
+
+- Replaced src/main.ts with full runtime wiring:
+  - playable stages for Rhythm Serpent, Mosh Pit Pac-Man, Amp Invaders
+  - global run clock + stage commit/retry/death/transition/results flow
+  - one-way progression + 60s commit unlock + early death behavior
+  - theme application + hidden admin panel + local leaderboard UI
+  - deterministic hooks: window.render_game_to_text, window.advanceTime, window.advanceTriathlonForTest
+- Added TDD coverage for core run flow in tests/domain/runFlow.test.ts and src/domain/runFlow.ts.
+- Fixed overlay re-render bug that detached START button each frame (e2e timeout).
+- Fixed Amp Invaders init ordering bug (enemySpeed before spawnWave).
+- Verification:
+  - npm run test: pass
+  - npm run lint: pass
+  - npm run build: pass
+  - npm run test:e2e -- e2e/triathlon-flow.spec.ts: pass
+  - develop-web-game playwright client run succeeded with escalated permissions and captured screenshot/state under output/web-game/wired-pass1.
+- TODO for next pass:
+  - tighten visual polish and richer FX/audio parity with design docs
+  - add deeper e2e for retry/commit/no-backtracking and admin theme lab interactions
+- Design pass 2:
+  - Visual direction updated toward reference synthwave style (sun glow, perspective grid, scanlines, vignette, neon HUD glow).
+  - Mosh Pit Pac-Man now uses zone-colored maze accents and stage-style corner lighting.
+- Audio pass:
+  - Added procedural music engine with stage BPM profiles and score-reactive intensity.
+  - Added event SFX for pickups, commit, death, and submit actions.
+  - Audio starts on START interaction to satisfy autoplay restrictions.
+- Amp Invaders mobile/auto-fire pass:
+  - Added continuous auto-fire cadence helper (src/games/amp-invaders/autoFire.ts).
+  - Stage 3 now always fires without input; touch controls now provide continuous horizontal steering.
+  - Added optional charged shot on hold-release while keeping auto-fire primary.
+- Added verification:
+  - tests/games/amp-invaders/autoFire.test.ts
+  - e2e/amp-autofire.spec.ts
+  - full suite/lint/build/e2e all green.
+- Reference alignment pass (aesthetic + audio):
+  - Reviewed `/Users/anubhav.mehrotra/Downloads/rhythm-serpent-v2.html` and `/Users/anubhav.mehrotra/Downloads/files 2/moshpit-pacman-v2.html` for concrete palette, glyph, and layering patterns.
+  - Updated Rhythm Serpent visuals: phase-based styling (OPENING/BUILD-UP/THE DROP), note-glyph food, distinct power-up icons, head/trail glow behavior, side stage barriers, and crowd silhouette motion.
+  - Updated Mosh Pit Pac-Man visuals: zone-note glyph rendering, corner-stage glow lighting, edge-highlighted walls by zone, distinct guard silhouettes, and stronger player glow/readability.
+  - Updated Amp Invaders visuals: genre-reactive backdrop palettes, merch-tent shields, DJ booth player art, richer enemy silhouettes per type, and stronger projectile readability.
+  - Upgraded procedural music engine from ambient-only pulse to beat-scheduled stage patterns (bass/lead/chord layering by stage + score).
+- Verification (fresh after reference-alignment pass):
+  - npm run test: pass
+  - npm run lint: pass
+  - npm run build: pass
+  - npm run test:e2e -- e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts: pass
+  - develop-web-game client capture produced artifacts at `output/web-game/design-pass4` (required escalated browser permission in this environment).
+- Fidelity pass 2 (typography + FX cadence):
+  - Added stage BPM-synced pulse domain helper: `src/domain/beatPulse.ts`.
+  - Added TDD coverage first, then implementation:
+    - `tests/domain/beatPulse.test.ts` (RED -> GREEN verified).
+  - Wired render pulse to BPM sync in `src/main.ts` so visual pulse cadence follows stage tempo.
+  - Improved shared background renderer for stronger synthwave identity:
+    - striped sunset bands, moving horizon grid scroll, amp-stage light beams, and stronger frame glow.
+  - Upgraded attract/start overlay typography + structure with headline stack and stage pills for clearer retro broadcast identity.
+  - Tightened HUD/card/button neon styling and text glow for higher visual parity with references.
+  - Fixed e2e strict selector regression by changing muted copy from "start" to "begin".
+- Verification (fresh after fidelity pass 2):
+  - npm run test -- tests/domain/beatPulse.test.ts: pass
+  - npm run test: pass
+  - npm run lint: pass
+  - npm run build: pass
+  - npm run test:e2e -- e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts: pass
+  - develop-web-game client capture produced artifacts at `output/web-game/design-pass5`.
+- Audio overhaul pass (user feedback: sound quality):
+  - Replaced lightweight ambient audio approach with a staged 16-step sequencer in `createAudioEngine`:
+    - dedicated buses (`music`, `duck`, `drum`, `sfx`, `master`) and compressor master chain
+    - procedural drum synthesis (kick/snare/hat) with reusable white-noise buffer
+    - stage-specific bass/chord/lead patterns for Rhythm Serpent, Mosh Pit Pac-Man, and Amp Invaders
+    - sidechain-style ducking on kick for stronger groove and clarity
+    - redesigned musical UI/gameplay stingers for pickup/commit/death/submit events
+  - Preserved runtime API (`audio.start`, `audio.update`, `audio.trigger`) to avoid gameplay regressions.
+- Verification (fresh after audio overhaul):
+  - npm run lint: pass
+  - npm run build: pass
+  - npm run test: pass
+  - npm run test:e2e -- e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts: pass
+- Planning pass:
+  - Added portrait mobile implementation board: `docs/plans/2026-02-17-mobile-first-v1-implementation-plan.md`.
+  - Updated the board with explicit UI real-estate optimization contract (compact HUD/rail, no-scroll states, playfield occupancy thresholds).
+
+- Mobile-first execution batch (Tasks 1-3):
+  - Added mobile smoke E2E: `e2e/mobile-smoke.spec.ts`
+    - 390x844 boot/start/no-overlay/no-scroll assertions
+    - 320x568 HUD+rail visibility assertion
+    - portrait resize stability assertion
+  - Added mobile QA baseline matrix: `docs/plans/2026-02-17-mobile-first-v1-qa-matrix.md`
+  - Added safe-area smoke contract in `tests/smoke/app-smoke.test.ts`.
+  - Implemented portrait foundation and safe-area shell in `src/main.ts`:
+    - `--safe-top/--safe-bottom/--safe-left/--safe-right` CSS tokens
+    - portrait `dvh` shell sizing, compact mobile rows/spacing, and no-page-scroll behavior
+    - viewport meta hardening via `ensureMobileViewportMeta()`
+    - canvas resize foundation: DPR clamp and input-bounds refresh on resize
+  - Added mobile input profile domain module (test-first):
+    - `src/domain/mobileInputProfile.ts`
+    - `tests/domain/mobileInputProfile.test.ts`
+    - covers swipe threshold, steer normalization + dead-zone, tap vs hold split
+  - Integrated mobile input profile into runtime `createInputController`:
+    - stage-aware touch profile selection
+    - gesture classification for swipe/tap/hold
+    - stage updates via `input.setStage(...)` on stage start
+  - Verification after batch:
+    - `npm run test -- tests/smoke/app-smoke.test.ts tests/domain/mobileInputProfile.test.ts`: pass
+    - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass
+    - `npm run test`: pass
+    - `npm run lint`: pass
+    - `npm run build`: pass
