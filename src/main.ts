@@ -21,6 +21,7 @@ import {
   type FlowState
 } from "./domain/runFlow";
 import { computeStageOptions } from "./domain/triathlonRules";
+import { resolveRunTotalMs } from "./domain/runConfig";
 import { saveScore, topScores } from "./leaderboard/leaderboardStore";
 import { getDefaultTheme, listThemes } from "./theme/themeRegistry";
 import type { ThemePack } from "./theme/themeTypes";
@@ -39,6 +40,13 @@ import { createEnemyDirector } from "./games/amp-invaders/enemyDirector";
 import { createBossDirector } from "./games/amp-invaders/bossDirector";
 import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specials";
 import { createZoneMusicState, updateZoneMusicState } from "./games/moshpit-pacman/zoneMusicState";
+import {
+  GUITAR_SOLO_PALETTE,
+  GUITAR_SOLO_POWER_KIND,
+  GUITAR_SOLO_SPRITE,
+  RHYTHM_SERPENT_POWER_KINDS,
+  type RhythmSerpentPowerKind
+} from "./games/rhythm-serpent/guitarSoloPowerup";
 
 type StageId = "rhythm-serpent" | "moshpit-pacman" | "amp-invaders";
 type Dir = "up" | "down" | "left" | "right";
@@ -85,16 +93,25 @@ type StageRuntime = {
 
 const STAGE_IDS: StageId[] = ["rhythm-serpent", "moshpit-pacman", "amp-invaders"];
 const STAGE_NAMES = ["Rhythm Serpent", "Mosh Pit Pac-Man", "Amp Invaders"];
-const RUN_TOTAL_MS = 9 * 60_000;
+const RUN_TOTAL_MS = resolveRunTotalMs(window.location.search);
 const THEME_OVERRIDE_KEY = "festiverse.theme.override";
 const THEME_CYCLE_KEY = "festiverse.theme.cycle";
 const THEME_CYCLE_INDEX_KEY = "festiverse.theme.cycle.index";
+const FORCE_GUITAR_SOLO_POWER = new URLSearchParams(window.location.search).get("forceGuitarSoloPower") === "1";
+const GUITAR_SOLO_SFX_URL = new URL("../assets/audio/lyria2/oneshot_guitar_solo.wav", import.meta.url).href;
+const GUITAR_SOLO_SPRITE_URL = new URL("../assets/sprites/rhythm-serpent-guitar-solo.png", import.meta.url).href;
 
 function must<T>(value: T | null | undefined, message: string): T {
   if (value === null || value === undefined) {
     throw new Error(message);
   }
   return value;
+}
+
+function createOptionalImage(src: string): HTMLImageElement {
+  const image = new Image();
+  image.src = src;
+  return image;
 }
 
 const app = must(document.querySelector<HTMLDivElement>("#app"), "Missing #app container");
@@ -109,7 +126,7 @@ app.innerHTML = `
     <header class="hud">
       <div class="hud-item" id="hud-time">09:00</div>
       <div class="hud-item hud-stage" id="hud-stage">Stage 1/3</div>
-      <div class="hud-item" id="hud-bank">Triathalon Score: 0</div>
+      <div class="hud-item" id="hud-bank">Triathlon Points: 0</div>
     </header>
     <section class="canvas-wrap">
       <canvas id="game-canvas"></canvas>
@@ -166,6 +183,7 @@ let secretTapDeadline = 0;
 let secretHoldTimer = 0;
 let isPointerHeldOnOverlay = false;
 let cycleThemesOnRestart = readBool(THEME_CYCLE_KEY);
+const guitarSoloSpriteImage = createOptionalImage(GUITAR_SOLO_SPRITE_URL);
 
 const input = createInputController(canvas);
 input.setStage(STAGE_IDS[flow.currentStageIndex] ?? "rhythm-serpent");
@@ -393,10 +411,15 @@ function render(): void {
 
 function syncHud(): void {
   const leftMs = Math.max(0, RUN_TOTAL_MS - globalElapsedMs);
+  const stageTri = currentStageTriPreview();
+  const projectedTri = projectedTriTotal();
+  const showProjected = mode === "playing" || mode === "deathPause" || mode === "deathChoice" || mode === "transition";
   hudTime.textContent = formatMs(leftMs);
   hudStage.textContent = mode === "results" || mode === "leaderboard" ? "Run Complete" : `Stage ${flow.currentStageIndex + 1}/3`;
-  hudBank.textContent = `Triathalon Score: ${totalBankedTri()}`;
-  hudScore.textContent = `Score: ${Math.round(flow.stageRaw)}`;
+  hudBank.textContent = showProjected
+    ? `Triathlon Points: ${totalBankedTri()} • Live ${projectedTri}`
+    : `Triathlon Points: ${totalBankedTri()}`;
+  hudScore.textContent = `Stage Raw: ${Math.round(flow.stageRaw)} • Stage Tri: ${stageTri}`;
   hudHint.textContent = stage.getHudHint();
 }
 
@@ -413,7 +436,7 @@ function syncOverlay(): void {
       <div class="card attract" data-secret-hold="true">
         <p class="eyebrow">NEON TOURNAMENT BROADCAST</p>
         <h1 class="title-stack"><span>FESTIVERSE</span><span>ARCADE TRIATHLON</span></h1>
-        <p class="strap">3 games. One clock. One total score.</p>
+        <p class="strap">3 games. One clock. One total tri score.</p>
         <p class="muted">Tap to enable audio and begin the set.</p>
         <button class="btn primary" data-testid="start" data-action="start-run">START</button>
         <div class="stage-pill-row">
@@ -447,9 +470,9 @@ function syncOverlay(): void {
     markup = `
       <div class="card">
         <h2>Stage ${transitionCommittedStageIndex + 1} Complete</h2>
-        <p>Stage Score: ${Math.round(transitionStageRawScore)}</p>
-        <p>Score Earned: +${transitionStageBankedScore}</p>
-        <p>Triathalon Score: ${transitionTotalScore}</p>
+        <p>Stage Raw Score: ${Math.round(transitionStageRawScore)}</p>
+        <p>Stage Tri Points: +${transitionStageBankedScore}</p>
+        <p>Total Tri Points: ${transitionTotalScore}</p>
         <p class="muted">Next: ${nextLabel}</p>
         <div class="row">
           <button class="btn primary" data-action="continue-stage">CONTINUE</button>
@@ -460,7 +483,7 @@ function syncOverlay(): void {
     const splits = flow.bankedTri.map((value, idx) => `<li>${STAGE_NAMES[idx]}: ${value}</li>`).join("");
     markup = `
       <div class="card results">
-        <h2>FINAL TRIATHALON SCORE</h2>
+        <h2>FINAL TRIATHLON TRI POINTS</h2>
         <p class="score">${totalBankedTri()}</p>
         <ul>${splits}</ul>
         <div class="row">
@@ -611,6 +634,19 @@ function totalBankedTri(): number {
   return flow.bankedTri.reduce((sum, score) => sum + score, 0);
 }
 
+function currentStageTriPreview(): number {
+  const stageId = STAGE_IDS[flow.currentStageIndex];
+  if (!stageId) {
+    return 0;
+  }
+  return Math.round(toTriPoints(stageId, Math.max(0, flow.stageRaw)));
+}
+
+function projectedTriTotal(): number {
+  const currentBanked = flow.bankedTri[flow.currentStageIndex] ?? 0;
+  return totalBankedTri() - currentBanked + currentStageTriPreview();
+}
+
 function submitCurrentRunScore(): void {
   if (submittedScore) {
     return;
@@ -657,8 +693,10 @@ function createRhythmSerpentStage(): StageRuntime {
   let comboTimerMs = 0;
   let food = randomGridPoint(cols, rows);
   let foodIcon = instrumentIcons[Math.floor(Math.random() * instrumentIcons.length)];
-  let power: { x: number; y: number; kind: "bass-drop" | "encore" | "mosh-burst" } | null = null;
+  let power: { x: number; y: number; kind: RhythmSerpentPowerKind } | null = null;
   let powerIcon = "";
+  let guitarSoloFxMs = 0;
+  let forcedGuitarSpawned = false;
   const trail: Array<{ x: number; y: number; bornMs: number; strength: number }> = [];
   const headGhosts: Array<{ x: number; y: number; bornMs: number; strength: number; color: string }> = [];
   const comboBursts: Array<{ bornMs: number; strength: number; color: string }> = [];
@@ -675,9 +713,33 @@ function createRhythmSerpentStage(): StageRuntime {
     moshBurstMs: 0
   };
 
-  function iconForPower(kind: "bass-drop" | "encore" | "mosh-burst"): string {
+  if (FORCE_GUITAR_SOLO_POWER) {
+    let forcedX = (spawnX + 4) % cols;
+    let forcedY = spawnY;
+    const occupied = (x: number, y: number) =>
+      snake.some((segment) => segment.x === x && segment.y === y) || (food.x === x && food.y === y);
+    for (let i = 0; i < cols * rows; i += 1) {
+      if (!occupied(forcedX, forcedY)) {
+        break;
+      }
+      forcedX = (forcedX + 1) % cols;
+      if (forcedX === 0) {
+        forcedY = (forcedY + 1) % rows;
+      }
+    }
+    power = {
+      x: forcedX,
+      y: forcedY,
+      kind: GUITAR_SOLO_POWER_KIND
+    };
+    powerIcon = iconForPower(power.kind);
+    forcedGuitarSpawned = true;
+  }
+
+  function iconForPower(kind: RhythmSerpentPowerKind): string {
     if (kind === "bass-drop") return "🎸";
     if (kind === "encore") return "🎹";
+    if (kind === GUITAR_SOLO_POWER_KIND) return "";
     return "🥁";
   }
 
@@ -696,13 +758,50 @@ function createRhythmSerpentStage(): StageRuntime {
     food = randomGridPoint(cols, rows, snake, power);
     foodIcon = instrumentIcons[Math.floor(Math.random() * instrumentIcons.length)];
     if (!power && Math.random() < 0.18) {
-      const kinds: Array<"bass-drop" | "encore" | "mosh-burst"> = ["bass-drop", "encore", "mosh-burst"];
+      const forcedKind =
+        FORCE_GUITAR_SOLO_POWER && !forcedGuitarSpawned ? GUITAR_SOLO_POWER_KIND : null;
       power = {
         ...randomGridPoint(cols, rows, snake, null, food),
-        kind: kinds[Math.floor(Math.random() * kinds.length)]
+        kind:
+          forcedKind ??
+          RHYTHM_SERPENT_POWER_KINDS[Math.floor(Math.random() * RHYTHM_SERPENT_POWER_KINDS.length)] ??
+          "bass-drop"
       };
       powerIcon = iconForPower(power.kind);
+      if (power.kind === GUITAR_SOLO_POWER_KIND) {
+        forcedGuitarSpawned = true;
+      }
     }
+  }
+
+  function drawGuitarSoloSprite(
+    context: CanvasRenderingContext2D,
+    centerX: number,
+    centerY: number,
+    drawSize: number
+  ): void {
+    const half = drawSize * 0.5;
+    const loaded = guitarSoloSpriteImage.complete && guitarSoloSpriteImage.naturalWidth > 0;
+    context.save();
+    context.imageSmoothingEnabled = false;
+    if (loaded) {
+      context.drawImage(guitarSoloSpriteImage, centerX - half, centerY - half, drawSize, drawSize);
+      context.restore();
+      return;
+    }
+    const px = drawSize / GUITAR_SOLO_SPRITE.length;
+    for (let y = 0; y < GUITAR_SOLO_SPRITE.length; y += 1) {
+      const row = GUITAR_SOLO_SPRITE[y] ?? "";
+      for (let x = 0; x < row.length; x += 1) {
+        const token = row[x] ?? ".";
+        if (token === ".") continue;
+        const color = GUITAR_SOLO_PALETTE[token];
+        if (!color) continue;
+        context.fillStyle = color;
+        context.fillRect(centerX - half + x * px, centerY - half + y * px, px, px);
+      }
+    }
+    context.restore();
   }
 
   function enqueueTurnInputs(input: InputFrame): void {
@@ -735,6 +834,7 @@ function createRhythmSerpentStage(): StageRuntime {
       timers.bassDropMs = Math.max(0, timers.bassDropMs - dtMs);
       timers.encoreMs = Math.max(0, timers.encoreMs - dtMs);
       timers.moshBurstMs = Math.max(0, timers.moshBurstMs - dtMs);
+      guitarSoloFxMs = Math.max(0, guitarSoloFxMs - dtMs);
 
       const baseTick = 150 - Math.min(56, snake.length * 2);
       let tick = baseTick;
@@ -810,7 +910,10 @@ function createRhythmSerpentStage(): StageRuntime {
         }
 
         if (power && next.x === power.x && next.y === power.y) {
-          if (power.kind === "bass-drop") {
+          if (power.kind === GUITAR_SOLO_POWER_KIND) {
+            guitarSoloFxMs = 3000;
+            audio.trigger("guitarSolo");
+          } else if (power.kind === "bass-drop") {
             timers.bassDropMs = 4500;
             score += 35;
           } else if (power.kind === "encore") {
@@ -820,7 +923,9 @@ function createRhythmSerpentStage(): StageRuntime {
             timers.moshBurstMs = 3500;
             score += 30;
           }
-          audio.trigger("pickup");
+          if (power.kind !== GUITAR_SOLO_POWER_KIND) {
+            audio.trigger("pickup");
+          }
           emitComboBurst(combo >= 8 ? 8 : 5);
           power = null;
           powerIcon = "";
@@ -857,7 +962,16 @@ function createRhythmSerpentStage(): StageRuntime {
       const now = performance.now();
       const progress = Math.max(0, Math.min(1, score / 360));
       const comboLift = Math.max(0, Math.min(1, combo / 10));
-      const powerLift = timers.encoreMs > 0 ? 0.2 : timers.bassDropMs > 0 ? 0.18 : timers.moshBurstMs > 0 ? 0.16 : 0;
+      const powerLift =
+        guitarSoloFxMs > 0
+          ? 0.22
+          : timers.encoreMs > 0
+          ? 0.2
+          : timers.bassDropMs > 0
+          ? 0.18
+          : timers.moshBurstMs > 0
+          ? 0.16
+          : 0;
       const energy = Math.max(0.12, Math.min(1, progress * 0.72 + comboLift * 0.24 + powerLift));
       const shakeBase = energy > 0.55 ? (energy - 0.55) * 3.6 : 0;
       const shakePower = timers.moshBurstMs > 0 ? 2.8 : timers.bassDropMs > 0 ? 2.1 : timers.encoreMs > 0 ? 1.5 : 0;
@@ -950,23 +1064,42 @@ function createRhythmSerpentStage(): StageRuntime {
       if (power) {
         const powerX = offX + power.x * cell + cell * 0.5;
         const powerY = offY + power.y * cell + cell * 0.5;
-        context.fillStyle = power.kind === "encore" ? "#ffd447" : power.kind === "bass-drop" ? "#4dd6ff" : "#ff7a34";
+        context.fillStyle =
+          power.kind === "encore"
+            ? "#ffd447"
+            : power.kind === "bass-drop"
+            ? "#4dd6ff"
+            : power.kind === GUITAR_SOLO_POWER_KIND
+            ? "#6fe2ff"
+            : "#ff7a34";
         context.beginPath();
         context.arc(powerX, powerY, cell * 0.55, 0, Math.PI * 2);
         context.fill();
         const powerGlow = context.createRadialGradient(powerX, powerY, cell * 0.12, powerX, powerY, cell * 0.98);
-        powerGlow.addColorStop(0, withAlpha(power.kind === "encore" ? "#ffd447" : power.kind === "bass-drop" ? "#4dd6ff" : "#ff7a34", 0.82));
+        const glowColor =
+          power.kind === "encore"
+            ? "#ffd447"
+            : power.kind === "bass-drop"
+            ? "#4dd6ff"
+            : power.kind === GUITAR_SOLO_POWER_KIND
+            ? "#7ef8ff"
+            : "#ff7a34";
+        powerGlow.addColorStop(0, withAlpha(glowColor, 0.82));
         powerGlow.addColorStop(1, withAlpha("#120018", 0));
         context.fillStyle = powerGlow;
         context.beginPath();
         context.arc(powerX, powerY, cell * 0.9, 0, Math.PI * 2);
         context.fill();
-        context.save();
-        context.textAlign = "center";
-        context.textBaseline = "middle";
-        context.font = `${Math.max(14, Math.floor(cell * 0.72))}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-        context.fillText(powerIcon, powerX, powerY + 1);
-        context.restore();
+        if (power.kind === GUITAR_SOLO_POWER_KIND) {
+          drawGuitarSoloSprite(context, powerX, powerY, cell * 1.9);
+        } else {
+          context.save();
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          context.font = `${Math.max(14, Math.floor(cell * 0.72))}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+          context.fillText(powerIcon, powerX, powerY + 1);
+          context.restore();
+        }
       }
 
       for (let i = trail.length - 1; i >= 0; i -= 1) {
@@ -1029,6 +1162,43 @@ function createRhythmSerpentStage(): StageRuntime {
           context.fillRect(sx + cell * 0.58, sy + cell * 0.18, cell * 0.16, cell * 0.16);
         }
       });
+
+      if (guitarSoloFxMs > 0) {
+        const life = guitarSoloFxMs / 3000;
+        const fade = 1 - life;
+        const head = snake[0];
+        const hx = offX + (head?.x ?? 0) * cell + cell * 0.5;
+        const hy = offY + (head?.y ?? 0) * cell + cell * 0.5;
+        context.save();
+        context.globalCompositeOperation = "screen";
+        const ringCount = 3;
+        for (let i = 0; i < ringCount; i += 1) {
+          const p = (fade + i / ringCount) % 1;
+          const radius = cell * (1.1 + p * 5.4);
+          context.strokeStyle = withAlpha(i % 2 === 0 ? "#90f8ff" : "#ffc4ff", 0.26 * (1 - p));
+          context.lineWidth = Math.max(1.2, cell * (0.08 - p * 0.04));
+          context.beginPath();
+          context.arc(hx, hy, radius, 0, Math.PI * 2);
+          context.stroke();
+        }
+        for (let i = 0; i < 10; i += 1) {
+          const angle = now * 0.008 + i * (Math.PI * 2 / 10);
+          const length = cell * (2.5 + Math.sin(now * 0.01 + i) * 1.5);
+          const x1 = hx + Math.cos(angle) * cell * 0.9;
+          const y1 = hy + Math.sin(angle) * cell * 0.9;
+          const x2 = hx + Math.cos(angle) * length;
+          const y2 = hy + Math.sin(angle) * length;
+          context.strokeStyle = withAlpha(i % 2 ? "#7fe2ff" : "#ffd2ef", 0.24 + beatBounce * 0.18);
+          context.lineWidth = Math.max(1, cell * 0.08);
+          context.beginPath();
+          context.moveTo(x1, y1);
+          context.lineTo(x2, y2);
+          context.stroke();
+        }
+        context.fillStyle = withAlpha("#b8f8ff", 0.07 + beatBounce * 0.08);
+        context.fillRect(offX, offY, fieldW, fieldH);
+        context.restore();
+      }
 
       const crowdY = offY + fieldH + 8;
       context.fillStyle = withAlpha("#311044", 0.6);
@@ -1099,7 +1269,9 @@ function createRhythmSerpentStage(): StageRuntime {
     },
     getHudHint() {
       const active =
-        timers.encoreMs > 0
+        guitarSoloFxMs > 0
+          ? "GUITAR SOLO!"
+          : timers.encoreMs > 0
           ? "ENCORE"
           : timers.bassDropMs > 0
           ? "BASS DROP"
@@ -1113,9 +1285,12 @@ function createRhythmSerpentStage(): StageRuntime {
         currentDir: dir,
         grid: { cols, rows },
         playerHead: { x: snake[0].x, y: snake[0].y },
+        food: { x: food.x, y: food.y },
+        power: power ? { x: power.x, y: power.y, kind: power.kind } : null,
         combo,
         snakeLength: snake.length,
-        powerActive: { ...timers },
+        pendingPowerKind: power?.kind ?? null,
+        powerActive: { ...timers, guitarSoloMs: guitarSoloFxMs },
         turnTelemetry: readTurnAssistTelemetry(turnAssist)
       };
     }
@@ -1623,6 +1798,7 @@ function createMoshPitPacmanStage(): StageRuntime {
       return {
         level,
         frightMs,
+        pelletsRemaining: pelletCount(),
         renderCoverageY,
         musicLayers: zoneMusic.activeLayers,
         musicIntensity: zoneMusic.intensity,
@@ -1681,6 +1857,7 @@ function createAmpInvadersStage(): StageRuntime {
   let bossSpeed = 92;
   let bossDefeatAwarded = false;
   let lastSpecialKind: "diveBomber" | "shieldBreaker" | null = null;
+  let stageWidth = 960;
 
   function spawnWave(level: number): Enemy[] {
     const waveSpec = getWaveSpec(STAGE3_V2_DEFAULT_CONFIG, level);
@@ -1803,6 +1980,7 @@ function createAmpInvadersStage(): StageRuntime {
     id: "amp-invaders",
     update(dtMs, input, width, height) {
       if (dead || cleared) return;
+      stageWidth = width;
       stageElapsedMs += dtMs;
 
       enemyFireCooldownMs -= dtMs;
@@ -2242,6 +2420,10 @@ function createAmpInvadersStage(): StageRuntime {
     debugState() {
       const alive = aliveEnemies();
       const boss = bossDirector.getState();
+      const enemyCenter =
+        alive.length > 0
+          ? alive.reduce((sum, enemy) => sum + enemy.x, 0) / alive.length
+          : null;
       return {
         wave,
         genre,
@@ -2266,6 +2448,9 @@ function createAmpInvadersStage(): StageRuntime {
         },
         enemyMinY: alive.length ? Math.min(...alive.map((enemy) => enemy.y)) : null,
         enemyMaxY: alive.length ? Math.max(...alive.map((enemy) => enemy.y)) : null,
+        enemyMinX: alive.length ? Math.min(...alive.map((enemy) => enemy.x)) : null,
+        enemyMaxX: alive.length ? Math.max(...alive.map((enemy) => enemy.x)) : null,
+        enemyCenterNorm: enemyCenter !== null ? enemyCenter / Math.max(1, stageWidth) : null,
         aliveEnemies: alive.length,
         totalShotsFired
       };
@@ -3116,7 +3301,7 @@ type AudioUpdateInput = {
   danger: boolean;
 };
 
-type AudioTrigger = "death" | "commit" | "submit" | "pickup" | "zone";
+type AudioTrigger = "death" | "commit" | "submit" | "pickup" | "zone" | "guitarSolo";
 
 function createAudioEngine() {
   let started = false;
@@ -3135,6 +3320,8 @@ function createAudioEngine() {
   let energy = 0.32;
   let prevPickupAt = 0;
   let prevDanger = false;
+  let guitarSoloBuffer: AudioBuffer | null = null;
+  let guitarSoloLoad: Promise<void> | null = null;
 
   function clamp(min: number, value: number, max: number): number {
     return Math.max(min, Math.min(max, value));
@@ -3193,6 +3380,28 @@ function createAudioEngine() {
     nextStepAt = audioContext.currentTime + 0.05;
     step16 = 0;
     started = true;
+
+    if (!guitarSoloLoad) {
+      guitarSoloLoad = loadOneShotBuffer(GUITAR_SOLO_SFX_URL).then((buffer) => {
+        guitarSoloBuffer = buffer;
+      });
+    }
+  }
+
+  async function loadOneShotBuffer(url: string): Promise<AudioBuffer | null> {
+    if (!audioContext) {
+      return null;
+    }
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        return null;
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      return await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    } catch {
+      return null;
+    }
   }
 
   function stageProfile(stage: StageId): {
@@ -3500,6 +3709,48 @@ function createAudioEngine() {
     });
   }
 
+  function triggerGuitarSolo(now: number): void {
+    if (!audioContext || !sfxGain) return;
+    const ctx = audioContext;
+    if (guitarSoloBuffer) {
+      const source = ctx.createBufferSource();
+      source.buffer = guitarSoloBuffer;
+      source.playbackRate.setValueAtTime(1, now);
+      const filter = ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(1800, now);
+      filter.Q.value = 0.6;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.36, now + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.22, now + Math.max(0.2, source.buffer.duration - 0.12));
+      gain.gain.exponentialRampToValueAtTime(0.001, now + source.buffer.duration);
+      source.connect(filter).connect(gain).connect(sfxGain);
+      source.start(now);
+      return;
+    }
+
+    // Fallback riff if sample generation has not run yet.
+    const base = 329.63;
+    const pattern = [0, 3, 7, 10, 12, 10, 7, 3, 0, 5, 7, 10];
+    const stepDur = 0.125;
+    const steps = Math.round(3 / stepDur);
+    for (let i = 0; i < steps; i += 1) {
+      const t = now + i * stepDur;
+      const semitone = pattern[i % pattern.length] ?? 0;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = i % 3 === 0 ? "sawtooth" : "triangle";
+      const freq = toFreq(base, semitone);
+      osc.frequency.setValueAtTime(freq, t);
+      osc.frequency.exponentialRampToValueAtTime(freq * (i % 4 === 0 ? 1.04 : 1.01), t + 0.09);
+      scheduleEnvelope(gain, t, 0.0015, 0.03, 0.08, i % 4 === 0 ? 0.16 : 0.11);
+      osc.connect(gain).connect(sfxGain);
+      osc.start(t);
+      osc.stop(t + 0.12);
+    }
+  }
+
   function scheduleTransport(input: AudioUpdateInput): void {
     if (!audioContext) return;
     const profile = stageProfile(input.stage);
@@ -3532,6 +3783,10 @@ function createAudioEngine() {
       }
       if (kind === "zone") {
         triggerZone(now);
+        return;
+      }
+      if (kind === "guitarSolo") {
+        triggerGuitarSolo(now);
         return;
       }
       triggerSubmit(now);
@@ -3579,8 +3834,11 @@ function renderGameToText(): string {
     stageName: STAGE_NAMES[flow.currentStageIndex] ?? "complete",
     runMsLeft: Math.max(0, RUN_TOTAL_MS - globalElapsedMs),
     canCommit: canCommitNow(flow),
+    bankedRaw: [...flow.bankedRaw],
     bankedTri: [...flow.bankedTri],
     stageRaw: Math.round(flow.stageRaw),
+    stageTriPreview: currentStageTriPreview(),
+    projectedTriTotal: projectedTriTotal(),
     totalTri: totalBankedTri(),
     theme: activeTheme.id,
     stageState: stage.debugState()

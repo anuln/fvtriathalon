@@ -48,3 +48,6 @@ Create a death one-shot: impact plus downward pitch movement and brief noise dec
 
 ### `oneshot_submit`
 Create a submit-score one-shot. Upward flourish and clean confirm hit, polished modern arcade feel, no vocals.
+
+### `oneshot_guitar_solo`
+Create a 3-second electric guitar solo stinger for a power-up moment. Energetic melodic lick with expressive bends, bright arcade rock tone, confident ending, no vocals.

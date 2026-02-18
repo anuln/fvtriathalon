@@ -140,6 +140,15 @@ const tasks = [
     prompt:
       "Create a submit-score one-shot. Upward flourish and clean confirm hit, polished modern arcade feel, no vocals.",
   },
+  {
+    id: "oneshot_guitar_solo",
+    kind: "oneshot",
+    bpm: 126,
+    targetMs: 3_000,
+    captureMs: 8_000,
+    prompt:
+      "Create a 3-second electric guitar solo stinger for a power-up moment. Energetic melodic lick with expressive bends, bright arcade rock tone, confident ending, no vocals.",
+  },
 ];
 
 const selectedTasks = only ? tasks.filter((task) => task.id.includes(only)) : tasks;
