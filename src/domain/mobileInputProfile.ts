@@ -41,11 +41,11 @@ const PROFILES: Record<MobileStageId, MobileInputProfile> = {
     steerGain: 1.1
   },
   "amp-invaders": {
-    swipeThresholdPx: 30,
+    swipeThresholdPx: 26,
     tapMaxTravelPx: 14,
     holdMinMs: 320,
-    steerDeadZone: 0.08,
-    steerGain: 1.8
+    steerDeadZone: 0.04,
+    steerGain: 2.2
   }
 };
 

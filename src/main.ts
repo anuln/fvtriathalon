@@ -7,6 +7,12 @@ import {
   normalizeSteerX
 } from "./domain/mobileInputProfile";
 import {
+  consumeTurnIntent,
+  createMobileTurnAssistState,
+  enqueueTurnIntent,
+  readTurnAssistTelemetry
+} from "./domain/mobileTurnAssist";
+import {
   advanceStage,
   canCommitNow,
   createFlowState,
@@ -40,6 +46,8 @@ type InputFrame = {
   actionHeld: boolean;
   actionPressed: boolean;
   steerX: number;
+  steerAimX: number | null;
+  touchSteerActive: boolean;
   consumeSwipe: () => Dir | null;
 };
 
@@ -639,6 +647,11 @@ function createRhythmSerpentStage(): StageRuntime {
   const comboBursts: Array<{ bornMs: number; strength: number; color: string }> = [];
   let lastMoveDir: Dir = dir;
   let lastBurstMilestone = 0;
+  const turnAssist = createMobileTurnAssistState({
+    maxQueue: 3,
+    ttlMs: 430,
+    blockOppositeTurns: true
+  });
   const timers = {
     bassDropMs: 0,
     encoreMs: 0,
@@ -675,6 +688,18 @@ function createRhythmSerpentStage(): StageRuntime {
     }
   }
 
+  function enqueueTurnInputs(input: InputFrame): void {
+    let swipe = input.consumeSwipe();
+    while (swipe) {
+      enqueueTurnIntent(turnAssist, swipe, stageMs);
+      swipe = input.consumeSwipe();
+    }
+    if (input.left) enqueueTurnIntent(turnAssist, "left", stageMs);
+    if (input.right) enqueueTurnIntent(turnAssist, "right", stageMs);
+    if (input.up) enqueueTurnIntent(turnAssist, "up", stageMs);
+    if (input.down) enqueueTurnIntent(turnAssist, "down", stageMs);
+  }
+
   return {
     id: "rhythm-serpent",
     update(dtMs, input) {
@@ -683,19 +708,7 @@ function createRhythmSerpentStage(): StageRuntime {
       }
       stageMs += dtMs;
       openingGraceMs = Math.max(0, openingGraceMs - dtMs);
-
-      const swipe = input.consumeSwipe();
-      if (swipe && !isOppositeDirection(dir, swipe)) {
-        dir = swipe;
-      } else if (input.left && dir !== "right") {
-        dir = "left";
-      } else if (input.right && dir !== "left") {
-        dir = "right";
-      } else if (input.up && dir !== "down") {
-        dir = "up";
-      } else if (input.down && dir !== "up") {
-        dir = "down";
-      }
+      enqueueTurnInputs(input);
 
       comboTimerMs -= dtMs;
       if (comboTimerMs <= 0) {
@@ -714,6 +727,10 @@ function createRhythmSerpentStage(): StageRuntime {
       moveMs += dtMs;
       while (moveMs >= tick) {
         moveMs -= tick;
+        const assistedTurn = consumeTurnIntent(turnAssist, stageMs, dir, () => true);
+        if (assistedTurn) {
+          dir = assistedTurn;
+        }
         const next = { ...snake[0] };
         if (dir === "left") next.x -= 1;
         if (dir === "right") next.x += 1;
@@ -1078,9 +1095,11 @@ function createRhythmSerpentStage(): StageRuntime {
       return {
         currentDir: dir,
         grid: { cols, rows },
+        playerHead: { x: snake[0].x, y: snake[0].y },
         combo,
         snakeLength: snake.length,
-        powerActive: { ...timers }
+        powerActive: { ...timers },
+        turnTelemetry: readTurnAssistTelemetry(turnAssist)
       };
     }
   };
@@ -1112,11 +1131,17 @@ function createMoshPitPacmanStage(): StageRuntime {
   let player = { x: 1, y: 1, dir: "right" as Dir, want: "right" as Dir };
   let moveMs = 0;
   let guardMoveMs = 0;
+  let stageMs = 0;
   let frightMs = 0;
   let score = 0;
   let dead = false;
   let level = 1;
   let guardChain = 0;
+  const turnAssist = createMobileTurnAssistState({
+    maxQueue: 3,
+    ttlMs: 380,
+    blockOppositeTurns: false
+  });
 
   const guards: Array<{ x: number; y: number; dir: Dir; homeX: number; homeY: number }> = [
     { x: cols - 2, y: 1, dir: "left", homeX: cols - 2, homeY: 1 },
@@ -1271,17 +1296,24 @@ function createMoshPitPacmanStage(): StageRuntime {
     }
   }
 
+  function enqueueTurnInputs(input: InputFrame): void {
+    let swipe = input.consumeSwipe();
+    while (swipe) {
+      enqueueTurnIntent(turnAssist, swipe, stageMs);
+      swipe = input.consumeSwipe();
+    }
+    if (input.left) enqueueTurnIntent(turnAssist, "left", stageMs);
+    if (input.right) enqueueTurnIntent(turnAssist, "right", stageMs);
+    if (input.up) enqueueTurnIntent(turnAssist, "up", stageMs);
+    if (input.down) enqueueTurnIntent(turnAssist, "down", stageMs);
+  }
+
   return {
     id: "moshpit-pacman",
     update(dtMs, input) {
       if (dead) return;
-
-      const swipe = input.consumeSwipe();
-      if (swipe) player.want = swipe;
-      if (input.left) player.want = "left";
-      if (input.right) player.want = "right";
-      if (input.up) player.want = "up";
-      if (input.down) player.want = "down";
+      stageMs += dtMs;
+      enqueueTurnInputs(input);
 
       frightMs = Math.max(0, frightMs - dtMs);
       moveMs += dtMs;
@@ -1290,6 +1322,13 @@ function createMoshPitPacmanStage(): StageRuntime {
       const playerStep = Math.max(72, 130 - level * 5);
       while (moveMs >= playerStep) {
         moveMs -= playerStep;
+        const assistedTurn = consumeTurnIntent(turnAssist, stageMs, player.dir, (candidate) => {
+          const delta = dirDelta(candidate);
+          return canMove(player.x + delta.x, player.y + delta.y);
+        });
+        if (assistedTurn) {
+          player.want = assistedTurn;
+        }
         const wantedDelta = dirDelta(player.want);
         if (canMove(player.x + wantedDelta.x, player.y + wantedDelta.y)) {
           player.dir = player.want;
@@ -1570,6 +1609,9 @@ function createMoshPitPacmanStage(): StageRuntime {
         renderCoverageY,
         musicLayers: zoneMusic.activeLayers,
         musicIntensity: zoneMusic.intensity,
+        playerDir: player.dir,
+        playerWant: player.want,
+        turnTelemetry: readTurnAssistTelemetry(turnAssist),
         player: { x: player.x, y: player.y },
         guards: guards.map((guard) => ({ x: guard.x, y: guard.y }))
       };
@@ -1588,6 +1630,10 @@ function createAmpInvadersStage(): StageRuntime {
   let genre: "jazz" | "rock" | "edm" | "metal" = "jazz";
   let playerX = 0.5;
   let playerVelX = 0;
+  let steerTargetX: number | null = null;
+  let steerError = 0;
+  let touchSteerActive = false;
+  let steerMode: "velocity" | "thumb-aim" = "velocity";
   let autoFireCooldownMs = 0;
   let chargeMs = 0;
   let wasHoldingAction = false;
@@ -1671,24 +1717,40 @@ function createAmpInvadersStage(): StageRuntime {
       enemyFireCooldownMs -= dtMs;
       discoTimerMs -= dtMs;
 
-      let steer = 0;
-      if (input.left) steer -= 1;
-      if (input.right) steer += 1;
-      steer += input.steerX;
-      steer = Math.max(-1, Math.min(1, steer));
-      const targetVelX = steer * 0.58;
-      const steerResponse = Math.min(1, dtMs / 80);
-      playerVelX += (targetVelX - playerVelX) * steerResponse;
-      if (Math.abs(steer) < 0.04) {
-        const driftDamping = Math.max(0, 1 - dtMs * 0.0085);
-        playerVelX *= driftDamping;
+      const thumbAimActive = input.touchSteerActive && input.steerAimX !== null;
+      touchSteerActive = thumbAimActive;
+      if (thumbAimActive) {
+        steerMode = "thumb-aim";
+        steerTargetX = Math.max(0.06, Math.min(0.94, input.steerAimX ?? playerX));
+        const delta = steerTargetX - playerX;
+        const targetVelX = Math.max(-2.45, Math.min(2.45, delta * 10.4));
+        const steerResponse = Math.min(1, dtMs / 24);
+        playerVelX += (targetVelX - playerVelX) * steerResponse;
+      } else {
+        steerMode = "velocity";
+        steerTargetX = null;
+        let steer = 0;
+        if (input.left) steer -= 1;
+        if (input.right) steer += 1;
+        steer += input.steerX;
+        steer = Math.max(-1, Math.min(1, steer));
+        const targetVelX = steer * 0.72;
+        const steerResponse = Math.min(1, dtMs / 56);
+        playerVelX += (targetVelX - playerVelX) * steerResponse;
+        if (Math.abs(steer) < 0.025) {
+          const driftDamping = Math.max(0, 1 - dtMs * 0.01);
+          playerVelX *= driftDamping;
+        }
       }
       playerX += playerVelX * (dtMs / 1000);
       if (playerX <= 0.06 || playerX >= 0.94) {
         playerVelX = 0;
       }
       playerX = Math.max(0.06, Math.min(0.94, playerX));
-      input.consumeSwipe();
+      steerError = steerTargetX === null ? 0 : Math.abs(steerTargetX - playerX);
+      while (input.consumeSwipe()) {
+        // Stage 3 does not use swipe turns; consume queued gestures so stale swipes do not leak across stages.
+      }
 
       fitEnemyFormationToViewport(width);
 
@@ -1957,6 +2019,12 @@ function createAmpInvadersStage(): StageRuntime {
         genre,
         lives,
         playerX,
+        controlTelemetry: {
+          touchSteerActive,
+          steerTargetX,
+          steerError,
+          steerMode
+        },
         enemyMinY: alive.length ? Math.min(...alive.map((enemy) => enemy.y)) : null,
         enemyMaxY: alive.length ? Math.max(...alive.map((enemy) => enemy.y)) : null,
         aliveEnemies: alive.length,
@@ -1972,6 +2040,8 @@ function createInputController(target: HTMLCanvasElement) {
   let actionPressed = false;
   let actionHeld = false;
   let steerX = 0;
+  let steerAimX: number | null = null;
+  let touchSteerActive = false;
   let touchStartX = 0;
   let touchStartY = 0;
   let touchStartedAt = 0;
@@ -2008,9 +2078,11 @@ function createInputController(target: HTMLCanvasElement) {
     touchStartedAt = performance.now();
     touchMoved = false;
     actionHeld = true;
+    touchSteerActive = true;
     refreshBounds();
     const profile = getMobileInputProfile(activeStage);
     steerX = normalizeSteerX(clientX, bounds.left, bounds.width, profile);
+    steerAimX = Math.max(0, Math.min(1, (clientX - bounds.left) / Math.max(1, bounds.width)));
   };
 
   const moveTouchGesture = (clientX: number, clientY: number) => {
@@ -2021,6 +2093,7 @@ function createInputController(target: HTMLCanvasElement) {
     }
     const profile = getMobileInputProfile(activeStage);
     steerX = normalizeSteerX(clientX, bounds.left, bounds.width, profile);
+    steerAimX = Math.max(0, Math.min(1, (clientX - bounds.left) / Math.max(1, bounds.width)));
     const moveGesture = classifyTouchGesture({
       startX: touchStartX,
       startY: touchStartY,
@@ -2057,12 +2130,16 @@ function createInputController(target: HTMLCanvasElement) {
     }
     actionHeld = false;
     steerX = 0;
+    steerAimX = null;
+    touchSteerActive = false;
     touchMoved = false;
   };
 
   const cancelTouchGesture = () => {
     actionHeld = false;
     steerX = 0;
+    steerAimX = null;
+    touchSteerActive = false;
     touchMoved = false;
   };
 
@@ -2205,6 +2282,10 @@ function createInputController(target: HTMLCanvasElement) {
     refreshBounds,
     setStage(stageId: StageId) {
       activeStage = stageId;
+      swipeQueue.length = 0;
+      steerX = 0;
+      steerAimX = null;
+      touchSteerActive = false;
     },
     consumeFrame(): InputFrame {
       const left = keys.has("ArrowLeft") || keys.has("KeyA");
@@ -2221,6 +2302,8 @@ function createInputController(target: HTMLCanvasElement) {
         actionHeld,
         actionPressed: pressed,
         steerX,
+        steerAimX,
+        touchSteerActive,
         consumeSwipe: () => swipeQueue.shift() ?? null
       };
     }
@@ -2425,15 +2508,6 @@ function randomGridPoint(
     }
   }
   return { x: 0, y: 0 };
-}
-
-function isOppositeDirection(current: Dir, next: Dir): boolean {
-  return (
-    (current === "left" && next === "right") ||
-    (current === "right" && next === "left") ||
-    (current === "up" && next === "down") ||
-    (current === "down" && next === "up")
-  );
 }
 
 function withAlpha(colorHex: string, alpha: number): string {

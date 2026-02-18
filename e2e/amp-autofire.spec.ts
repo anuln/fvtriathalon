@@ -139,3 +139,97 @@ test("amp invaders touch steering moves smoothly in both directions on mobile", 
   expect(movedLeft.playerX).toBeLessThan(movedRight - 0.04);
   expect(movedLeft.mode).toBe("playing");
 });
+
+test("amp invaders touch steering tracks thumb position with low error", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("http://127.0.0.1:4173/");
+  await page.getByTestId("start").click();
+
+  await page.evaluate(() => {
+    const advance = (window as Window & { advanceTriathlonForTest?: () => void }).advanceTriathlonForTest;
+    advance?.();
+    advance?.();
+  });
+
+  await page.evaluate(() => {
+    const canvas = document.querySelector("#game-canvas");
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const y = rect.top + rect.height * 0.82;
+    canvas.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 31,
+        pointerType: "touch",
+        clientX: rect.left + rect.width * 0.5,
+        clientY: y
+      })
+    );
+    canvas.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 31,
+        pointerType: "touch",
+        clientX: rect.left + rect.width * 0.86,
+        clientY: y
+      })
+    );
+  });
+
+  await page.evaluate(() => {
+    (window as Window & { advanceTime?: (ms: number) => void }).advanceTime?.(240);
+  });
+
+  const rightState = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    return JSON.parse(json) as {
+      stageName?: string;
+      mode?: string;
+      stageState?: { playerX?: number; controlTelemetry?: { steerError?: number; touchSteerActive?: boolean } };
+    };
+  });
+
+  await page.evaluate(() => {
+    const canvas = document.querySelector("#game-canvas");
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const y = rect.top + rect.height * 0.82;
+    canvas.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 31,
+        pointerType: "touch",
+        clientX: rect.left + rect.width * 0.14,
+        clientY: y
+      })
+    );
+  });
+
+  await page.evaluate(() => {
+    (window as Window & { advanceTime?: (ms: number) => void }).advanceTime?.(260);
+  });
+
+  const leftState = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    return JSON.parse(json) as {
+      stageName?: string;
+      mode?: string;
+      stageState?: { playerX?: number; controlTelemetry?: { steerError?: number; touchSteerActive?: boolean } };
+    };
+  });
+
+  expect(rightState.stageName).toBe("Amp Invaders");
+  expect(rightState.mode).toBe("playing");
+  expect(rightState.stageState?.playerX ?? 0).toBeGreaterThan(0.72);
+  expect(rightState.stageState?.controlTelemetry?.touchSteerActive).toBe(true);
+  expect(rightState.stageState?.controlTelemetry?.steerError ?? 1).toBeLessThan(0.18);
+
+  expect(leftState.stageName).toBe("Amp Invaders");
+  expect(leftState.mode).toBe("playing");
+  expect(leftState.stageState?.playerX ?? 1).toBeLessThan(0.3);
+  expect(leftState.stageState?.controlTelemetry?.touchSteerActive).toBe(true);
+  expect(leftState.stageState?.controlTelemetry?.steerError ?? 1).toBeLessThan(0.18);
+});

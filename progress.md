@@ -258,3 +258,34 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
   - `npm run lint`: pass
   - `npm run build`: pass
   - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts e2e/stage-flow.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (14 passed)
+
+- Cross-stage mobile control pass (Tasks 1 + 2 generalized across all stages):
+  - Added shared turn-assist domain helper with telemetry counters:
+    - `src/domain/mobileTurnAssist.ts`
+    - `tests/domain/mobileTurnAssist.test.ts`
+  - Stage 1 (Rhythm Serpent):
+    - integrated buffered turn queue with TTL + opposite-turn guard to preserve rapid chained swipes at higher speed.
+    - expanded `debugState` with `playerHead` and `turnTelemetry`.
+  - Stage 2 (Mosh Pit Pac-Man):
+    - integrated buffered turn queue to retain early thumb turns until legal lane opens.
+    - expanded `debugState` with `playerDir`, `playerWant`, and `turnTelemetry`.
+  - Stage 3 (Amp Invaders):
+    - added touch-aim precision path (`steerAimX`) with faster correction and bounded velocity for tighter left/right control.
+    - tuned mobile profile (`steerDeadZone`, `steerGain`, swipe threshold) for more responsive thumb steering.
+    - expanded `debugState` with `controlTelemetry` (`touchSteerActive`, `steerTargetX`, `steerError`, `steerMode`).
+  - Input controller updates:
+    - `InputFrame` now includes `steerAimX` + `touchSteerActive`.
+    - touch gesture lifecycle now tracks absolute thumb aim x.
+    - stage switches clear stale swipe/steer state.
+  - E2E additions/updates (`e2e/mobile-controls.spec.ts`, `e2e/amp-autofire.spec.ts`):
+    - new snake rapid-chained-turn reliability test.
+    - new pac-man buffered-turn reliability test.
+    - new amp thumb-precision/low-error control test.
+
+- Verification after cross-stage mobile pass:
+  - `npm run test -- tests/domain/mobileTurnAssist.test.ts tests/domain/mobileInputProfile.test.ts tests/games/moshpit-pacman/zoneMusicState.test.ts`: pass
+  - `npm run test:e2e -- e2e/mobile-controls.spec.ts e2e/amp-autofire.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-smoke.spec.ts`: pass
+  - `npm run test`: pass
+  - `npm run lint`: pass
+  - `npm run build`: pass
+  - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts e2e/stage-flow.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (17 passed)

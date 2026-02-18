@@ -6,6 +6,15 @@ type RuntimeState = {
     currentDir?: string;
     grid?: { cols: number; rows: number };
     player?: { x: number; y: number };
+    playerHead?: { x: number; y: number };
+    turnTelemetry?: {
+      pendingTurns?: number;
+      acceptedTurns?: number;
+      expiredTurns?: number;
+      rejectedTurns?: number;
+      droppedTurns?: number;
+      lastTurnLatencyMs?: number | null;
+    };
   };
 };
 
@@ -137,7 +146,71 @@ test.describe("mobile controls", () => {
     expect(heightCoverage).toBeGreaterThan(0.8);
   });
 
-  test("mosh pit pac-man applies pointer-touch swipe direction changes", async ({ page }) => {
+  test("rhythm serpent keeps first corner turn when swipes are chained rapidly", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("http://127.0.0.1:4173/");
+    await page.getByTestId("start").click();
+
+    const initial = await readState(page);
+    expect(initial.stageName).toBe("Rhythm Serpent");
+    const startHead = initial.stageState?.playerHead;
+    expect(startHead).toBeDefined();
+
+    const canvasBox = await page.locator("#game-canvas").boundingBox();
+    expect(canvasBox).not.toBeNull();
+    const box = canvasBox ?? { x: 0, y: 0, width: 1, height: 1 };
+    const startX = box.x + box.width * 0.52;
+    const startY = box.y + box.height * 0.74;
+
+    await page.evaluate(
+      ({ x, y }) => {
+        const canvas = document.querySelector("#game-canvas");
+        if (!canvas) return;
+        canvas.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            bubbles: true,
+            cancelable: true,
+            pointerId: 7,
+            pointerType: "touch",
+            clientX: x,
+            clientY: y
+          })
+        );
+        canvas.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            cancelable: true,
+            pointerId: 7,
+            pointerType: "touch",
+            clientX: x,
+            clientY: y - 95
+          })
+        );
+        canvas.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            cancelable: true,
+            pointerId: 7,
+            pointerType: "touch",
+            clientX: x + 95,
+            clientY: y - 95
+          })
+        );
+      },
+      { x: startX, y: startY }
+    );
+
+    await page.evaluate(() => {
+      (window as Window & { advanceTime?: (ms: number) => void }).advanceTime?.(220);
+    });
+
+    const state = await readState(page);
+    expect(state.stageName).toBe("Rhythm Serpent");
+    expect((state.stageState?.playerHead?.y ?? Number.POSITIVE_INFINITY)).toBeLessThan(startHead?.y ?? 0);
+    expect(state.stageState?.turnTelemetry?.acceptedTurns ?? 0).toBeGreaterThan(0);
+  });
+
+  test("mosh pit pac-man prioritizes earliest buffered turn in rapid swipe chains", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("http://127.0.0.1:4173/");
     await page.getByTestId("start").click();
@@ -146,14 +219,10 @@ test.describe("mobile controls", () => {
       (window as Window & { advanceTriathlonForTest?: () => void }).advanceTriathlonForTest?.();
     });
 
-    const before = await readState(page);
-    expect(before.stageName).toBe("Mosh Pit Pac-Man");
-    expect(before.stageState?.player).toEqual({ x: 1, y: 1 });
-
     const canvasBox = await page.locator("#game-canvas").boundingBox();
     expect(canvasBox).not.toBeNull();
     const box = canvasBox ?? { x: 0, y: 0, width: 1, height: 1 };
-    const startX = box.x + box.width * 0.52;
+    const startX = box.x + box.width * 0.5;
     const startY = box.y + box.height * 0.64;
 
     await page.evaluate(
@@ -164,7 +233,7 @@ test.describe("mobile controls", () => {
           new PointerEvent("pointerdown", {
             bubbles: true,
             cancelable: true,
-            pointerId: 1,
+            pointerId: 11,
             pointerType: "touch",
             clientX: x,
             clientY: y
@@ -174,10 +243,30 @@ test.describe("mobile controls", () => {
           new PointerEvent("pointermove", {
             bubbles: true,
             cancelable: true,
-            pointerId: 1,
+            pointerId: 11,
             pointerType: "touch",
             clientX: x,
-            clientY: y + 100
+            clientY: y + 92
+          })
+        );
+        canvas.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            cancelable: true,
+            pointerId: 11,
+            pointerType: "touch",
+            clientX: x - 90,
+            clientY: y + 92
+          })
+        );
+        canvas.dispatchEvent(
+          new PointerEvent("pointerup", {
+            bubbles: true,
+            cancelable: true,
+            pointerId: 11,
+            pointerType: "touch",
+            clientX: x - 90,
+            clientY: y + 92
           })
         );
       },
@@ -185,11 +274,14 @@ test.describe("mobile controls", () => {
     );
 
     await page.evaluate(() => {
-      (window as Window & { advanceTime?: (ms: number) => void }).advanceTime?.(260);
+      (window as Window & { advanceTime?: (ms: number) => void }).advanceTime?.(90);
     });
 
-    const after = await readState(page);
-    expect(after.stageName).toBe("Mosh Pit Pac-Man");
-    expect(after.stageState?.player?.y ?? 0).toBeGreaterThan(1);
+    const state = await readState(page);
+    expect(state.stageName).toBe("Mosh Pit Pac-Man");
+    expect(state.stageState?.player?.x).toBe(1);
+    expect(state.stageState?.player?.y ?? 0).toBeGreaterThan(1);
+    expect(state.stageState?.turnTelemetry?.pendingTurns ?? 0).toBeGreaterThan(0);
+    expect(state.stageState?.turnTelemetry?.acceptedTurns ?? 0).toBeGreaterThan(0);
   });
 });
