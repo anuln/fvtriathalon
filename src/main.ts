@@ -19,6 +19,7 @@ import { saveScore, topScores } from "./leaderboard/leaderboardStore";
 import { getDefaultTheme, listThemes } from "./theme/themeRegistry";
 import type { ThemePack } from "./theme/themeTypes";
 import { stepAutoFire } from "./games/amp-invaders/autoFire";
+import { createZoneMusicState, updateZoneMusicState } from "./games/moshpit-pacman/zoneMusicState";
 
 type StageId = "rhythm-serpent" | "moshpit-pacman" | "amp-invaders";
 type Dir = "up" | "down" | "left" | "right";
@@ -1125,6 +1126,8 @@ function createMoshPitPacmanStage(): StageRuntime {
 
   const zoneCollected = [0, 0, 0, 0, 0];
   const zoneTotals = [0, 0, 0, 0, 0];
+  let zoneMusic = createZoneMusicState(zoneTotals.length);
+  let renderCoverageY = 0;
   recomputeZoneTotals();
 
   function zoneIndex(x: number, y: number): number {
@@ -1147,6 +1150,7 @@ function createMoshPitPacmanStage(): StageRuntime {
         }
       }
     }
+    zoneMusic = createZoneMusicState(zoneTotals.length);
   }
 
   function canMove(x: number, y: number): boolean {
@@ -1308,18 +1312,33 @@ function createMoshPitPacmanStage(): StageRuntime {
         checkGuardCollision();
       }
 
+      const nextZoneMusic = updateZoneMusicState(zoneMusic, zoneCollected, zoneTotals, frightMs);
+      if (nextZoneMusic.pendingStingers > 0) {
+        const burst = Math.min(2, nextZoneMusic.pendingStingers);
+        for (let i = 0; i < burst; i += 1) {
+          audio.trigger("zone");
+        }
+      }
+      zoneMusic = nextZoneMusic;
+
       if (pelletCount() === 0) {
         refillPellets();
       }
     },
     draw(context, width, height, theme) {
       const zoneColors = ["#ff4444", "#ff8833", "#44ddff", "#cc44ff", "#ffdd44"];
-      const cell = Math.floor(Math.min(width / cols, height / rows));
-      const fieldW = cols * cell;
-      const fieldH = rows * cell;
+      const isPortrait = height / Math.max(1, width) > 1.35;
+      const cellX = Math.max(10, Math.floor(width / cols));
+      const targetFieldH = isPortrait ? height * 0.72 : height * 0.58;
+      const cellY = Math.max(cellX, Math.floor(targetFieldH / rows));
+      const fieldW = cols * cellX;
+      const fieldH = rows * cellY;
       const offX = Math.floor((width - fieldW) / 2);
       const offY = Math.floor((height - fieldH) / 2);
-      const beatPulse = 0.5 + Math.sin(performance.now() * 0.008) * 0.5;
+      renderCoverageY = fieldH / Math.max(1, height);
+      const unit = Math.min(cellX, cellY);
+      const beatPulseRaw = 0.5 + Math.sin(performance.now() * 0.008) * 0.5;
+      const beatPulse = Math.max(0, Math.min(1, beatPulseRaw * 0.8 + zoneMusic.intensity * 0.24));
 
       function drawZoneNoteGlyph(zone: number, x: number, y: number, size: number, color: string): void {
         context.fillStyle = color;
@@ -1386,54 +1405,54 @@ function createMoshPitPacmanStage(): StageRuntime {
       for (let y = 0; y < rows; y += 1) {
         for (let x = 0; x < cols; x += 1) {
           const cellType = map[y][x];
-          const px = offX + x * cell;
-          const py = offY + y * cell;
+          const px = offX + x * cellX;
+          const py = offY + y * cellY;
           const zone = zoneIndex(x, y);
           context.fillStyle = withAlpha(zoneColors[zone], 0.04);
-          context.fillRect(px, py, cell, cell);
+          context.fillRect(px, py, cellX, cellY);
 
           if (cellType === "#") {
             context.fillStyle = withAlpha("#160828", 0.95);
-            context.fillRect(px, py, cell, cell);
+            context.fillRect(px, py, cellX, cellY);
             const edgeColor = frightMs > 0 ? "#00ddaa" : zoneColors[zone];
-            context.strokeStyle = withAlpha(edgeColor, 0.72);
+            context.strokeStyle = withAlpha(edgeColor, 0.72 + zoneMusic.intensity * 0.14);
             context.lineWidth = 1.2;
             if (y === 0 || map[y - 1][x] !== "#") {
               context.beginPath();
               context.moveTo(px, py + 1);
-              context.lineTo(px + cell, py + 1);
+              context.lineTo(px + cellX, py + 1);
               context.stroke();
             }
             if (y === rows - 1 || map[y + 1][x] !== "#") {
               context.beginPath();
-              context.moveTo(px, py + cell - 1);
-              context.lineTo(px + cell, py + cell - 1);
+              context.moveTo(px, py + cellY - 1);
+              context.lineTo(px + cellX, py + cellY - 1);
               context.stroke();
             }
             if (x === 0 || map[y][x - 1] !== "#") {
               context.beginPath();
               context.moveTo(px + 1, py);
-              context.lineTo(px + 1, py + cell);
+              context.lineTo(px + 1, py + cellY);
               context.stroke();
             }
             if (x === cols - 1 || map[y][x + 1] !== "#") {
               context.beginPath();
-              context.moveTo(px + cell - 1, py);
-              context.lineTo(px + cell - 1, py + cell);
+              context.moveTo(px + cellX - 1, py);
+              context.lineTo(px + cellX - 1, py + cellY);
               context.stroke();
             }
           } else if (cellType === "." || cellType === "o") {
-            const centerX = px + cell * 0.5;
-            const centerY = py + cell * 0.5;
+            const centerX = px + cellX * 0.5;
+            const centerY = py + cellY * 0.5;
             if (cellType === ".") {
-              drawZoneNoteGlyph(zone, centerX, centerY, cell * (0.12 + beatPulse * 0.03), zoneColors[zone]);
+              drawZoneNoteGlyph(zone, centerX, centerY, unit * (0.12 + beatPulse * 0.03), zoneColors[zone]);
             } else {
               context.beginPath();
-              context.arc(centerX, centerY, cell * (0.26 + beatPulse * 0.05), 0, Math.PI * 2);
+              context.arc(centerX, centerY, unit * (0.26 + beatPulse * 0.05), 0, Math.PI * 2);
               context.fillStyle = withAlpha("#00ddaa", 0.24 + beatPulse * 0.15);
               context.fill();
               context.beginPath();
-              context.arc(centerX, centerY, cell * 0.15, 0, Math.PI * 2);
+              context.arc(centerX, centerY, unit * 0.15, 0, Math.PI * 2);
               context.fillStyle = "#00ddaa";
               context.fill();
             }
@@ -1441,45 +1460,45 @@ function createMoshPitPacmanStage(): StageRuntime {
         }
       }
 
-      const playerCenterX = offX + player.x * cell + cell * 0.5;
-      const playerCenterY = offY + player.y * cell + cell * 0.5;
+      const playerCenterX = offX + player.x * cellX + cellX * 0.5;
+      const playerCenterY = offY + player.y * cellY + cellY * 0.5;
       const playerGlow = context.createRadialGradient(
         playerCenterX,
         playerCenterY,
-        cell * 0.1,
+        unit * 0.1,
         playerCenterX,
         playerCenterY,
-        cell * 1.2
+        unit * 1.2
       );
       playerGlow.addColorStop(0, withAlpha(frightMs > 0 ? "#00ffcc" : "#ffcc33", 0.38));
       playerGlow.addColorStop(1, withAlpha(frightMs > 0 ? "#00ffcc" : "#ffcc33", 0));
       context.fillStyle = playerGlow;
-      context.fillRect(playerCenterX - cell * 1.2, playerCenterY - cell * 1.2, cell * 2.4, cell * 2.4);
+      context.fillRect(playerCenterX - unit * 1.2, playerCenterY - unit * 1.2, unit * 2.4, unit * 2.4);
 
       const angleMap: Record<Dir, number> = { right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2 };
       const facing = angleMap[player.dir];
       context.fillStyle = frightMs > 0 ? "#33ffd6" : "#ffe35f";
       context.beginPath();
       context.moveTo(playerCenterX, playerCenterY);
-      context.arc(playerCenterX, playerCenterY, cell * 0.38, facing + 0.35, facing + Math.PI * 2 - 0.35);
+      context.arc(playerCenterX, playerCenterY, unit * 0.38, facing + 0.35, facing + Math.PI * 2 - 0.35);
       context.closePath();
       context.fill();
 
       guards.forEach((guard, index) => {
-        const gx = offX + guard.x * cell + cell * 0.5;
-        const gy = offY + guard.y * cell + cell * 0.5;
+        const gx = offX + guard.x * cellX + cellX * 0.5;
+        const gy = offY + guard.y * cellY + cellY * 0.5;
         if (frightMs > 0) {
           context.fillStyle = "#4aa8ff";
           context.beginPath();
-          context.arc(gx, gy, cell * 0.34, 0, Math.PI * 2);
+          context.arc(gx, gy, unit * 0.34, 0, Math.PI * 2);
           context.fill();
           context.strokeStyle = withAlpha("#ffffff", 0.8);
           context.lineWidth = 1.2;
           context.beginPath();
-          context.moveTo(gx - cell * 0.2, gy + cell * 0.12);
-          context.lineTo(gx - cell * 0.05, gy + cell * 0.24);
-          context.lineTo(gx + cell * 0.1, gy + cell * 0.12);
-          context.lineTo(gx + cell * 0.25, gy + cell * 0.24);
+          context.moveTo(gx - unit * 0.2, gy + unit * 0.12);
+          context.lineTo(gx - unit * 0.05, gy + unit * 0.24);
+          context.lineTo(gx + unit * 0.1, gy + unit * 0.12);
+          context.lineTo(gx + unit * 0.25, gy + unit * 0.24);
           context.stroke();
           return;
         }
@@ -1487,48 +1506,49 @@ function createMoshPitPacmanStage(): StageRuntime {
         const character = index % 3;
         if (character === 0) {
           context.fillStyle = "#ff3344";
-          context.fillRect(gx - cell * 0.32, gy - cell * 0.3, cell * 0.64, cell * 0.62);
+          context.fillRect(gx - cellX * 0.32, gy - cellY * 0.3, cellX * 0.64, cellY * 0.62);
           context.fillStyle = "#111111";
-          context.fillRect(gx - cell * 0.2, gy - cell * 0.16, cell * 0.4, cell * 0.14);
+          context.fillRect(gx - cellX * 0.2, gy - cellY * 0.16, cellX * 0.4, cellY * 0.14);
           context.fillStyle = "#ffd447";
-          context.fillRect(gx - cell * 0.24, gy + cell * 0.1, cell * 0.48, cell * 0.08);
+          context.fillRect(gx - cellX * 0.24, gy + cellY * 0.1, cellX * 0.48, cellY * 0.08);
         } else if (character === 1) {
           context.fillStyle = "#ff77cc";
           context.beginPath();
-          context.arc(gx, gy - cell * 0.02, cell * 0.3, 0, Math.PI * 2);
+          context.arc(gx, gy - unit * 0.02, unit * 0.3, 0, Math.PI * 2);
           context.fill();
           context.fillStyle = "#262626";
-          context.fillRect(gx - cell * 0.2, gy + cell * 0.14, cell * 0.38, cell * 0.2);
+          context.fillRect(gx - cellX * 0.2, gy + cellY * 0.14, cellX * 0.38, cellY * 0.2);
           context.fillStyle = "#88aaff";
           context.beginPath();
-          context.arc(gx - cell * 0.02, gy + cell * 0.24, cell * 0.08, 0, Math.PI * 2);
+          context.arc(gx - unit * 0.02, gy + unit * 0.24, unit * 0.08, 0, Math.PI * 2);
           context.fill();
         } else {
           context.fillStyle = "#44aaff";
-          context.fillRect(gx - cell * 0.32, gy - cell * 0.18, cell * 0.64, cell * 0.35);
+          context.fillRect(gx - cellX * 0.32, gy - cellY * 0.18, cellX * 0.64, cellY * 0.35);
           context.fillStyle = "#222222";
           context.beginPath();
-          context.arc(gx - cell * 0.2, gy + cell * 0.24, cell * 0.08, 0, Math.PI * 2);
-          context.arc(gx + cell * 0.2, gy + cell * 0.24, cell * 0.08, 0, Math.PI * 2);
+          context.arc(gx - unit * 0.2, gy + unit * 0.24, unit * 0.08, 0, Math.PI * 2);
+          context.arc(gx + unit * 0.2, gy + unit * 0.24, unit * 0.08, 0, Math.PI * 2);
           context.fill();
           context.fillStyle = "#ffaa00";
-          context.fillRect(gx - cell * 0.18, gy - cell * 0.3, cell * 0.36, cell * 0.06);
+          context.fillRect(gx - cellX * 0.18, gy - cellY * 0.3, cellX * 0.36, cellY * 0.06);
         }
       });
 
       const zoneNames = ["D", "B", "S", "L", "V"];
+      const zoneBarY = Math.max(8, offY - 18);
       for (let i = 0; i < zoneNames.length; i += 1) {
         const total = Math.max(1, zoneTotals[i]);
         const pct = zoneCollected[i] / total;
         const x = offX + (i / zoneNames.length) * fieldW;
         const w = fieldW / zoneNames.length - 4;
-        context.fillStyle = withAlpha(zoneColors[i], 0.2);
-        context.fillRect(x + 2, offY - 18, w, 10);
+        context.fillStyle = withAlpha(zoneColors[i], 0.22 + zoneMusic.intensity * 0.1);
+        context.fillRect(x + 2, zoneBarY, w, 10);
         context.fillStyle = withAlpha(zoneColors[i], 0.92);
-        context.fillRect(x + 2, offY - 18, w * Math.min(1, pct), 10);
+        context.fillRect(x + 2, zoneBarY, w * Math.min(1, pct), 10);
         context.fillStyle = theme.palette.text;
         context.font = "10px monospace";
-        context.fillText(zoneNames[i], x + 4, offY - 22);
+        context.fillText(zoneNames[i], x + 4, zoneBarY - 4);
       }
     },
     getRawScore() {
@@ -1538,12 +1558,18 @@ function createMoshPitPacmanStage(): StageRuntime {
       return dead;
     },
     getHudHint() {
-      return frightMs > 0 ? "Backstage Pass Active • Chase security" : "Collect picks. Clear zones.";
+      if (frightMs > 0) {
+        return `Backstage Pass Active • Chase security • Groove ${Math.round(zoneMusic.intensity * 100)}%`;
+      }
+      return `Collect picks. Clear zones. Groove ${Math.round(zoneMusic.intensity * 100)}%`;
     },
     debugState() {
       return {
         level,
         frightMs,
+        renderCoverageY,
+        musicLayers: zoneMusic.activeLayers,
+        musicIntensity: zoneMusic.intensity,
         player: { x: player.x, y: player.y },
         guards: guards.map((guard) => ({ x: guard.x, y: guard.y }))
       };
@@ -2763,7 +2789,7 @@ type AudioUpdateInput = {
   danger: boolean;
 };
 
-type AudioTrigger = "death" | "commit" | "submit" | "pickup";
+type AudioTrigger = "death" | "commit" | "submit" | "pickup" | "zone";
 
 function createAudioEngine() {
   let started = false;
@@ -3129,6 +3155,24 @@ function createAudioEngine() {
     });
   }
 
+  function triggerZone(now: number): void {
+    if (!audioContext || !sfxGain) return;
+    const ctx = audioContext;
+    const sfx = sfxGain;
+    const notes = [392, 493.88, 587.33];
+    notes.forEach((n, i) => {
+      const t = now + i * 0.03;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(n, t);
+      scheduleEnvelope(gain, t, 0.001, 0.02, 0.08, 0.08);
+      osc.connect(gain).connect(sfx);
+      osc.start(t);
+      osc.stop(t + 0.11);
+    });
+  }
+
   function scheduleTransport(input: AudioUpdateInput): void {
     if (!audioContext) return;
     const profile = stageProfile(input.stage);
@@ -3157,6 +3201,10 @@ function createAudioEngine() {
       }
       if (kind === "death") {
         triggerDeath(now);
+        return;
+      }
+      if (kind === "zone") {
+        triggerZone(now);
         return;
       }
       triggerSubmit(now);

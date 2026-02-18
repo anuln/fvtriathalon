@@ -55,4 +55,25 @@ test.describe("mobile portrait smoke", () => {
     expect(state.stageName).toBe("Rhythm Serpent");
     await expect(page.locator("#game-canvas")).toBeVisible();
   });
+
+  test("stage 2 uses mobile-friendly vertical playfield occupancy", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("http://127.0.0.1:4173/");
+    await page.getByTestId("start").click();
+
+    await page.evaluate(() => {
+      (window as Window & { advanceTriathlonForTest?: () => void }).advanceTriathlonForTest?.();
+    });
+
+    const state = await page.evaluate(() => {
+      const text = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+      return JSON.parse(text) as {
+        stageName?: string;
+        stageState?: { renderCoverageY?: number };
+      };
+    });
+
+    expect(state.stageName).toBe("Mosh Pit Pac-Man");
+    expect(state.stageState?.renderCoverageY ?? 0).toBeGreaterThan(0.68);
+  });
 });
