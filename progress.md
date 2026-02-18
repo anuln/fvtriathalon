@@ -155,3 +155,31 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
   - `npm run lint`: pass
   - `npm run build`: pass
   - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-controls.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (7 passed, 1 skipped)
+
+- Mobile controls follow-up (Pac-Man check):
+  - Added stage-2 pointer-touch regression in `e2e/mobile-controls.spec.ts`:
+    - `mosh pit pac-man applies pointer-touch swipe direction changes`
+    - validates that downward swipe changes movement path in Mosh Pit Pac-Man.
+  - Result: Pac-Man swipe controls are functioning with the pointer-touch input path introduced in the prior hotfix.
+- Verification (fresh):
+  - `npm run test:e2e -- e2e/mobile-controls.spec.ts`: pass (3 passed, 1 skipped touch-fallback case)
+  - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-controls.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (8 passed, 1 skipped)
+
+- Mobile swipe reliability fix (Rhythm Serpent still broken report):
+  - Root-cause confirmed by failing test: when Pointer Events were available, touch listeners were disabled; some mobile browsers/devices still rely on touch-event paths in mixed/compat mode.
+  - Added/updated E2E contracts in `e2e/mobile-controls.spec.ts`:
+    - `rhythm serpent applies touch-event swipe turns (compat path)`
+    - retained pointer-touch path check
+    - retained mosh-pit pointer-touch path check
+  - Updated `createInputController` in `src/main.ts`:
+    - register BOTH pointer and touch listeners (instead of exclusive pointer-or-touch)
+    - add pointer->touch dedupe window to avoid double-processing gestures
+    - guard pointer capture/release in try/catch for browser compatibility
+    - treat non-mouse pointers as touch-like
+  - Outcome: swipe direction changes now work in pointer-primary and touch-compat mobile paths.
+- Verification (fresh after reliability fix):
+  - `npm run test:e2e -- e2e/mobile-controls.spec.ts`: pass
+  - `npm run test`: pass
+  - `npm run lint`: pass
+  - `npm run build`: pass
+  - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-controls.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (9 passed)

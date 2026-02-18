@@ -5,6 +5,7 @@ type RuntimeState = {
   stageState?: {
     currentDir?: string;
     grid?: { cols: number; rows: number };
+    player?: { x: number; y: number };
   };
 };
 
@@ -92,12 +93,10 @@ test.describe("mobile controls", () => {
     expect(state.stageState?.currentDir).toBe("up");
   });
 
-  test("rhythm serpent applies swipe turns before touchend", async ({ page }) => {
+  test("rhythm serpent applies touch-event swipe turns (compat path)", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("http://127.0.0.1:4173/");
     await page.getByTestId("start").click();
-    const touchPrimary = await page.evaluate(() => !("PointerEvent" in window));
-    test.skip(!touchPrimary, "Touch events are fallback-only when PointerEvent is available.");
 
     const canvasBox = await page.locator("#game-canvas").boundingBox();
     expect(canvasBox).not.toBeNull();
@@ -136,5 +135,61 @@ test.describe("mobile controls", () => {
 
     expect(rows).toBeGreaterThan(cols);
     expect(heightCoverage).toBeGreaterThan(0.8);
+  });
+
+  test("mosh pit pac-man applies pointer-touch swipe direction changes", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("http://127.0.0.1:4173/");
+    await page.getByTestId("start").click();
+
+    await page.evaluate(() => {
+      (window as Window & { advanceTriathlonForTest?: () => void }).advanceTriathlonForTest?.();
+    });
+
+    const before = await readState(page);
+    expect(before.stageName).toBe("Mosh Pit Pac-Man");
+    expect(before.stageState?.player).toEqual({ x: 1, y: 1 });
+
+    const canvasBox = await page.locator("#game-canvas").boundingBox();
+    expect(canvasBox).not.toBeNull();
+    const box = canvasBox ?? { x: 0, y: 0, width: 1, height: 1 };
+    const startX = box.x + box.width * 0.52;
+    const startY = box.y + box.height * 0.64;
+
+    await page.evaluate(
+      ({ x, y }) => {
+        const canvas = document.querySelector("#game-canvas");
+        if (!canvas) return;
+        canvas.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            bubbles: true,
+            cancelable: true,
+            pointerId: 1,
+            pointerType: "touch",
+            clientX: x,
+            clientY: y
+          })
+        );
+        canvas.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            cancelable: true,
+            pointerId: 1,
+            pointerType: "touch",
+            clientX: x,
+            clientY: y + 100
+          })
+        );
+      },
+      { x: startX, y: startY }
+    );
+
+    await page.evaluate(() => {
+      (window as Window & { advanceTime?: (ms: number) => void }).advanceTime?.(260);
+    });
+
+    const after = await readState(page);
+    expect(after.stageName).toBe("Mosh Pit Pac-Man");
+    expect(after.stageState?.player?.y ?? 0).toBeGreaterThan(1);
   });
 });

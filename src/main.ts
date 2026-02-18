@@ -1909,6 +1909,7 @@ function createInputController(target: HTMLCanvasElement) {
   let touchStartedAt = 0;
   let touchMoved = false;
   let activePointerId: number | null = null;
+  let lastPointerTouchAt = Number.NEGATIVE_INFINITY;
   let activeStage: StageId = "rhythm-serpent";
   let bounds = target.getBoundingClientRect();
 
@@ -1997,30 +1998,43 @@ function createInputController(target: HTMLCanvasElement) {
     touchMoved = false;
   };
 
+  const TOUCH_POINTER_DEDUP_MS = 450;
+  const isTouchLikePointer = (event: PointerEvent): boolean => event.pointerType !== "mouse";
+  const markPointerTouch = () => {
+    lastPointerTouchAt = performance.now();
+  };
+  const shouldIgnoreTouchEvent = () => performance.now() - lastPointerTouchAt < TOUCH_POINTER_DEDUP_MS;
+
   const supportsPointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
   if (supportsPointerEvents) {
     target.addEventListener("pointerdown", (event) => {
-      if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+      if (!isTouchLikePointer(event)) {
         return;
       }
       if (event.cancelable) {
         event.preventDefault();
       }
+      markPointerTouch();
       activePointerId = event.pointerId;
-      target.setPointerCapture(event.pointerId);
       beginTouchGesture(event.clientX, event.clientY);
+      try {
+        target.setPointerCapture(event.pointerId);
+      } catch {
+        // Some mobile browsers may reject pointer capture for touch pointers.
+      }
     }, { passive: false });
 
     target.addEventListener("pointermove", (event) => {
       if (activePointerId === null || event.pointerId !== activePointerId) {
         return;
       }
-      if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+      if (!isTouchLikePointer(event)) {
         return;
       }
       if (event.cancelable) {
         event.preventDefault();
       }
+      markPointerTouch();
       moveTouchGesture(event.clientX, event.clientY);
     }, { passive: false });
 
@@ -2028,15 +2042,20 @@ function createInputController(target: HTMLCanvasElement) {
       if (activePointerId === null || event.pointerId !== activePointerId) {
         return;
       }
-      if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+      if (!isTouchLikePointer(event)) {
         return;
       }
       if (event.cancelable) {
         event.preventDefault();
       }
+      markPointerTouch();
       endTouchGesture(event.clientX, event.clientY);
-      if (target.hasPointerCapture(event.pointerId)) {
-        target.releasePointerCapture(event.pointerId);
+      try {
+        if (target.hasPointerCapture(event.pointerId)) {
+          target.releasePointerCapture(event.pointerId);
+        }
+      } catch {
+        // Ignore release failures on browsers with partial pointer-capture support.
       }
       activePointerId = null;
     }, { passive: false });
@@ -2045,51 +2064,71 @@ function createInputController(target: HTMLCanvasElement) {
       if (activePointerId === null || event.pointerId !== activePointerId) {
         return;
       }
+      if (!isTouchLikePointer(event)) {
+        return;
+      }
+      markPointerTouch();
       cancelTouchGesture();
-      if (target.hasPointerCapture(event.pointerId)) {
-        target.releasePointerCapture(event.pointerId);
+      try {
+        if (target.hasPointerCapture(event.pointerId)) {
+          target.releasePointerCapture(event.pointerId);
+        }
+      } catch {
+        // Ignore release failures on browsers with partial pointer-capture support.
       }
       activePointerId = null;
     }, { passive: true });
-  } else {
-    target.addEventListener("touchstart", (event) => {
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-      const touch = event.changedTouches[0];
-      if (!touch) {
-        return;
-      }
-      beginTouchGesture(touch.clientX, touch.clientY);
-    }, { passive: false });
-
-    target.addEventListener("touchmove", (event) => {
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-      const touch = event.changedTouches[0];
-      if (!touch) {
-        return;
-      }
-      moveTouchGesture(touch.clientX, touch.clientY);
-    }, { passive: false });
-
-    target.addEventListener("touchend", (event) => {
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-      const touch = event.changedTouches[0];
-      if (!touch) {
-        cancelTouchGesture();
-        return;
-      }
-      endTouchGesture(touch.clientX, touch.clientY);
-    }, { passive: false });
-
-    target.addEventListener("touchcancel", () => {
-      cancelTouchGesture();
-    }, { passive: true });
   }
+
+  target.addEventListener("touchstart", (event) => {
+    if (shouldIgnoreTouchEvent()) {
+      return;
+    }
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      return;
+    }
+    beginTouchGesture(touch.clientX, touch.clientY);
+  }, { passive: false });
+
+  target.addEventListener("touchmove", (event) => {
+    if (shouldIgnoreTouchEvent()) {
+      return;
+    }
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      return;
+    }
+    moveTouchGesture(touch.clientX, touch.clientY);
+  }, { passive: false });
+
+  target.addEventListener("touchend", (event) => {
+    if (shouldIgnoreTouchEvent()) {
+      return;
+    }
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      cancelTouchGesture();
+      return;
+    }
+    endTouchGesture(touch.clientX, touch.clientY);
+  }, { passive: false });
+
+  target.addEventListener("touchcancel", () => {
+    if (shouldIgnoreTouchEvent()) {
+      return;
+    }
+    cancelTouchGesture();
+  }, { passive: true });
 
   window.addEventListener("resize", refreshBounds, { passive: true });
   window.addEventListener("orientationchange", refreshBounds);
