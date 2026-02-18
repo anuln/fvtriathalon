@@ -683,7 +683,7 @@ function createRhythmSerpentStage(): StageRuntime {
   let moveMs = 0;
   let stageMs = 0;
   let score = 0;
-  let nextSurvivalBonusMs = 8_000;
+  let nextSurvivalBonusMs = 9_000;
   let nextLengthMilestone = 6;
   let dead = false;
   let openingGraceMs = 5500;
@@ -829,9 +829,9 @@ function createRhythmSerpentStage(): StageRuntime {
       enqueueTurnInputs(input);
 
       while (stageMs >= nextSurvivalBonusMs) {
-        const sustainBonus = Math.max(20, 20 + Math.floor((snake.length - 3) * 3.2) + combo * 3);
+        const sustainBonus = Math.max(18, 18 + Math.floor((snake.length - 3) * 2.8) + combo * 2);
         addScore(sustainBonus);
-        nextSurvivalBonusMs += 8_000;
+        nextSurvivalBonusMs += 9_000;
       }
 
       comboTimerMs -= dtMs;
@@ -905,11 +905,11 @@ function createRhythmSerpentStage(): StageRuntime {
           combo = Math.max(1, combo + 1);
           comboTimerMs = 3000;
           const mult = combo >= 8 ? 2.5 : combo >= 5 ? 2 : combo >= 3 ? 1.5 : 1;
-          const baseFoodScore = 24 + combo * 3;
-          const lengthBoost = 1 + Math.max(0, snake.length - 3) * 0.12;
+          const baseFoodScore = 22 + combo * 2;
+          const lengthBoost = 1 + Math.max(0, snake.length - 3) * 0.1;
           addScore(Math.round(baseFoodScore * mult * lengthBoost));
           if (snake.length >= nextLengthMilestone) {
-            addScore(nextLengthMilestone * 18);
+            addScore(nextLengthMilestone * 16);
             nextLengthMilestone += 3;
           }
           audio.trigger("pickup");
@@ -926,17 +926,17 @@ function createRhythmSerpentStage(): StageRuntime {
         if (power && next.x === power.x && next.y === power.y) {
           if (power.kind === GUITAR_SOLO_POWER_KIND) {
             guitarSoloFxMs = GUITAR_SOLO_BONUS_MS;
-            addScore(140);
+            addScore(124);
             audio.trigger("guitarSolo");
           } else if (power.kind === "bass-drop") {
             timers.bassDropMs = 4500;
-            addScore(80);
+            addScore(72);
           } else if (power.kind === "encore") {
             timers.encoreMs = 4000;
-            addScore(100);
+            addScore(88);
           } else {
             timers.moshBurstMs = 3500;
-            addScore(72);
+            addScore(64);
           }
           if (power.kind !== GUITAR_SOLO_POWER_KIND) {
             audio.trigger("pickup");
