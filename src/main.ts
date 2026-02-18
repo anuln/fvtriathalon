@@ -25,6 +25,7 @@ import { saveScore, topScores } from "./leaderboard/leaderboardStore";
 import { getDefaultTheme, listThemes } from "./theme/themeRegistry";
 import type { ThemePack } from "./theme/themeTypes";
 import { stepAutoFire } from "./games/amp-invaders/autoFire";
+import { resolveEnemyBulletHit } from "./games/amp-invaders/collision";
 import { createZoneMusicState, updateZoneMusicState } from "./games/moshpit-pacman/zoneMusicState";
 
 type StageId = "rhythm-serpent" | "moshpit-pacman" | "amp-invaders";
@@ -1836,21 +1837,25 @@ function createAmpInvadersStage(): StageRuntime {
 
       for (const bullet of bullets) {
         if (bullet.enemy) {
-          const shieldIndex = bullet.x < width / 3 ? 0 : bullet.x < (width * 2) / 3 ? 1 : 2;
-          const shieldX = ((shieldIndex + 0.5) * width) / 3;
-          const shieldY = height - 150;
-          const shieldAlive = shields[shieldIndex] > 0;
-          if (shieldAlive && Math.abs(bullet.x - shieldX) < 58 && Math.abs(bullet.y - shieldY) < 24) {
-            shields[shieldIndex] = Math.max(0, shields[shieldIndex] - 12);
-            bullet.y = height + 100;
+          const hit = resolveEnemyBulletHit({
+            bulletX: bullet.x,
+            bulletY: bullet.y,
+            width,
+            height,
+            playerXNorm: playerX,
+            shields
+          });
+          if (hit.shieldIndex !== null && hit.shieldDamage > 0) {
+            shields[hit.shieldIndex] = Math.max(0, shields[hit.shieldIndex] - hit.shieldDamage);
           }
-
-          if (Math.abs(bullet.x - playerX * width) < 26 && bullet.y > height - 86) {
+          if (hit.playerHit) {
             lives -= 1;
-            bullet.y = height + 100;
             if (lives <= 0) {
               dead = true;
             }
+          }
+          if (hit.consumed) {
+            bullet.y = height + 100;
           }
         } else {
           for (const enemy of enemies) {

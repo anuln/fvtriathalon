@@ -218,6 +218,22 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
   - Implemented fix in `src/main.ts` (Amp Invaders stage):
     - added `fitEnemyFormationToViewport(width)` to compress/recenter alive enemy block for viewport width.
     - applied dynamic edge padding for direction flips.
+
+- Stage 3 collision fairness fix (false death report):
+  - Added RED test-first coverage in `tests/games/amp-invaders/collision.test.ts` for:
+    - shield-consumed bullet not also damaging player
+    - below-player bullets not registering as hits
+    - direct booth overlap still counting as a hit
+  - Implemented `resolveEnemyBulletHit` helper in `src/games/amp-invaders/collision.ts` and wired Stage 3 enemy-bullet logic in `src/main.ts` to use it.
+  - Behavior change:
+    - shield collision now consumes bullet cleanly without follow-on player hit checks
+    - player hits now use bounded booth-overlap (`abs(y - playerY) < threshold`) instead of one-sided `y > ...` rule
+  - Verification (fresh):
+    - `npm run test -- tests/games/amp-invaders/collision.test.ts`: pass
+    - `npm run test`: pass (34 tests)
+    - `npm run lint`: pass
+    - `npm run build`: pass
+    - `npm run test:e2e -- e2e/amp-autofire.spec.ts`: pass (4/4)
     - retained drop behavior only on legitimate edge hits.
   - Improved Stage 3 steering feel in `src/main.ts`:
     - replaced direct position jump with velocity-smoothed steering (`playerVelX`) with damping.
