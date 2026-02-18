@@ -460,7 +460,6 @@ function syncOverlay(): void {
   if (mode === "boot") {
     markup = `
       <div class="card attract" data-secret-hold="true">
-        <p class="eyebrow">${bootCopy.eyebrow}</p>
         <h1 class="title-stack"><span>${bootCopy.titleTop}</span><span>${bootCopy.titleBottom}</span></h1>
         <p class="strap">${bootCopy.strap}</p>
         <p class="muted">${bootCopy.hint}</p>
@@ -3369,6 +3368,11 @@ function injectStyles(): void {
       box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45), 0 0 32px rgba(255, 63, 183, 0.14);
       text-align: center;
     }
+    .card.attract {
+      display: grid;
+      gap: 10px;
+      padding: 26px 24px 22px;
+    }
     .card.compact {
       width: min(78vw, 420px);
     }
@@ -3398,7 +3402,7 @@ function injectStyles(): void {
     }
     .btn {
       border: 1px solid rgba(255, 255, 255, 0.25);
-      background: transparent;
+      background: #66179D;
       color: var(--text);
       border-radius: 10px;
       padding: 10px 14px;
@@ -3412,16 +3416,17 @@ function injectStyles(): void {
       transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background-color 120ms ease;
     }
     .btn.primary {
-      background: color-mix(in srgb, var(--primary) 34%, transparent);
-      border-color: color-mix(in srgb, var(--primary) 58%, white 8%);
-      box-shadow: 0 0 16px rgba(0, 229, 255, 0.28);
+      background: #66179D;
+      border-color: #a36bc8;
+      box-shadow: 0 0 16px rgba(102, 23, 157, 0.45);
     }
     .btn.secondary {
-      background: color-mix(in srgb, var(--surface) 50%, transparent);
+      background: #66179D;
     }
     .btn:hover {
       transform: translateY(-1px);
-      border-color: rgba(255, 255, 255, 0.45);
+      border-color: rgba(255, 255, 255, 0.58);
+      background: #7722b2;
     }
     .btn:active {
       transform: translateY(0);
@@ -3519,18 +3524,10 @@ function injectStyles(): void {
       align-items: center;
       margin-bottom: 3px;
     }
-    .attract .eyebrow {
-      margin: 0 0 6px;
-      font-size: 11px;
-      letter-spacing: 0.24em;
-      color: #8fe9ff;
-      text-transform: uppercase;
-      text-shadow: 0 0 10px rgba(0, 229, 255, 0.6);
-    }
     .attract .title-stack {
       display: grid;
-      gap: 2px;
-      margin-bottom: 10px;
+      gap: 4px;
+      margin: 0;
       line-height: 0.92;
     }
     .attract .title-stack span:first-child {
@@ -3548,9 +3545,10 @@ function injectStyles(): void {
       letter-spacing: 0.12em;
       text-transform: uppercase;
       color: #e6f0ff;
+      margin: 0;
     }
     .stage-pill-row {
-      margin-top: 12px;
+      margin-top: 2px;
       display: flex;
       flex-wrap: wrap;
       justify-content: center;
@@ -3627,6 +3625,10 @@ function injectStyles(): void {
       .card {
         width: min(95vw, 520px);
         padding: 14px;
+      }
+      .card.attract {
+        gap: 8px;
+        padding: 20px 16px 18px;
       }
     }
     @media (max-width: 389px) {

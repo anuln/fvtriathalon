@@ -1,5 +1,4 @@
 export const bootCopy = {
-  eyebrow: "NEON TOURNAMENT BROADCAST",
   titleTop: "FESTIVERSE",
   titleBottom: "ARCADE TRIATHLON",
   strap: "3 stages. 1 timer. Chase the headline.",
