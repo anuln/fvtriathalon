@@ -178,7 +178,8 @@ async function simulateRun({ browser, baseUrl, runMinutes, profileName, profile,
 
       if (mode === "results") {
         await syncKeys(page, activeKeys, new Set());
-        const totalTri = Math.round(Number(state.totalTri ?? 0));
+        const baseScore = Math.round(Number(state.totalScore ?? state.totalTri ?? 0));
+        const finalScore = Math.round(Number(state.finalScore ?? baseScore));
         const endedByClock = Number(state.runMsLeft ?? 0) <= 0;
 
         return {
@@ -186,7 +187,9 @@ async function simulateRun({ browser, baseUrl, runMinutes, profileName, profile,
           runIndex,
           seed,
           runMinutes,
-          totalTri,
+          totalTri: baseScore,
+          totalScore: baseScore,
+          finalScore,
           endedByClock,
           bankedRaw: bankedRaw.map((n) => Math.round(Number(n ?? 0))),
           bankedTri: bankedTri.map((n) => Math.round(Number(n ?? 0))),
@@ -455,19 +458,21 @@ function summarizeRecords(records) {
 
   const summary = {};
   for (const [profile, list] of Object.entries(byProfile)) {
-    const totals = list.map((r) => r.totalTri);
+    const baseTotals = list.map((r) => r.totalScore ?? r.totalTri);
+    const finalTotals = list.map((r) => r.finalScore ?? r.totalTri);
     const stageRaw = [0, 1, 2].map((idx) => list.map((r) => Number(r.bankedRaw[idx] ?? 0)));
     const stageTri = [0, 1, 2].map((idx) => list.map((r) => Number(r.bankedTri[idx] ?? 0)));
 
     summary[profile] = {
       runs: list.length,
-      totalTri: stats(totals),
+      baseScore: stats(baseTotals),
+      finalScore: stats(finalTotals),
       endedByClockRate: round(list.filter((r) => r.endedByClock).length / Math.max(1, list.length), 4),
       stageRawAvg: stageRaw.map((vals) => round(mean(vals), 2)),
       stageTriAvg: stageTri.map((vals) => round(mean(vals), 2)),
       stageTriShareAvg: [0, 1, 2].map((idx) => {
         const shares = list.map((r) => {
-          const total = Math.max(1, Number(r.totalTri));
+          const total = Math.max(1, Number(r.totalScore ?? r.totalTri));
           return Number(r.bankedTri[idx] ?? 0) / total;
         });
         return round(mean(shares), 4);

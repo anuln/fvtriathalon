@@ -458,3 +458,94 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
   - Improve simulation policy quality for Snake/Pac pathing so specialists can reliably express high-skill score ceilings.
   - Run `sim:batch` at 6 / 7.5 / 9 minutes and compare completion rate + stage tri-share variance.
   - Tune `src/domain/scoring.ts` K-values iteratively against those simulation distributions.
+
+- Scoring model simplification + balance pass (2026-02-18 late):
+  - Removed normalized tri-point conversion path from runtime scoring flow.
+  - New model:
+    - stage scores are additive raw scores (`computeStageScore`)
+    - final score = base stage sum + time-left bonus (`computeFinalScore`, `computeTimeLeftBonus`)
+    - time bonus rate set to `2` points per second remaining.
+  - Updated runtime overlays/labels:
+    - transition now shows `Stage Score` and `Total Score`
+    - results now show `FINAL SCORE` with `Base Score` and `Time Bonus` breakdown.
+  - Fixed mismatch contract:
+    - after stage 1 commit, `Total Score` now equals `Stage Score` (enforced in `e2e/stage-flow.spec.ts`).
+  - Rebalanced stage raw score economies:
+    - Rhythm Serpent boosted progression:
+      - higher food scaling with combo + length
+      - periodic survival bonuses every 12s
+      - stronger power-up rewards and guitar-solo pickup reward
+    - Mosh Pit Pac-Man modestly boosted baseline progression (pellets/power/chains)
+    - Amp Invaders reduced spike rewards (kills, wave clears, disco, boss entry/defeat, charge bonus)
+
+- Added/updated score-domain tests:
+  - `tests/domain/scoring.test.ts`
+  - validates additive stage scores, bounded time bonus, and final score composition.
+
+- Verification (fresh):
+  - `npm run test -- tests/domain/scoring.test.ts tests/domain/runFlow.test.ts`: pass
+  - `npm run test:e2e -- e2e/stage-flow.spec.ts e2e/triathlon-flow.spec.ts`: pass
+  - `npm run test`: pass
+  - `npm run lint`: pass
+  - `npm run build`: pass
+
+- Post-change small simulation batch (3 runs/profile):
+  - output: `output/simulations/post-rebalance.json`
+  - balanced profile stage share (base score):
+    - stage1 ~4.8%
+    - stage2 ~28.9%
+    - stage3 ~66.4%
+  - note: Amp remains dominant in balanced profile despite reductions; further Stage 3 score damping and/or Stage 1 progression buffs still needed.
+- Guitar-solo follow-up update (new icon + scoring buff):
+  - Replaced the prior guitar-solo sprite with a monochrome pixel conversion based on the latest provided PNG.
+    - Updated fallback sprite map/palette: `src/games/rhythm-serpent/guitarSoloPowerup.ts`
+    - Updated rendered PNG asset: `assets/sprites/rhythm-serpent-guitar-solo.png`
+  - Added explicit guitar-solo scoring contract in power-up module:
+    - `GUITAR_SOLO_BONUS_MS = 5000`
+    - `GUITAR_SOLO_SCORE_MULTIPLIER = 2`
+    - `applyGuitarSoloScoreMultiplier(...)`
+  - Applied 2x multiplier to Rhythm Serpent scoring while solo buff is active:
+    - food points
+    - survival bonus ticks
+    - non-guitar power-up point awards
+    - guitar-solo now starts a 5s buff window (no direct flat bonus on pickup)
+  - UI/debug updates:
+    - HUD hint now shows `GUITAR SOLO 2X` during buff
+    - debug state now exposes `guitarSoloMultiplier` alongside `guitarSoloMs`
+  - Test-first updates:
+    - extended `tests/games/rhythm-serpent/guitarSoloPowerup.test.ts` with 2x/5s assertions.
+- Verification (fresh):
+  - `npm run test -- tests/games/rhythm-serpent/guitarSoloPowerup.test.ts tests/games/rhythm-serpent/rhythmSerpentRules.test.ts`: pass
+  - `npm run build`: pass
+  - `npm run lint`: pass
+  - develop-web-game Playwright capture (`?forceGuitarSoloPower=1`) confirms active buff state:
+    - `output/web-game/guitar-solo-mult-pass1/state-0.json` shows `guitarSoloMs > 0` and `guitarSoloMultiplier: 2`.
+- Simulation reporting update:
+  - `scripts/simulate-score-balance.mjs` now reports both base stage-sum score and final score (with time bonus).
+  - Quick balanced rerun output: `output/simulations/post-rebalance-balanced-final.json`.
+  - Small-sample balanced base stage-share moved to approximately:
+    - stage1 ~8.7%
+    - stage2 ~41.6%
+    - stage3 ~49.7%
+- Focused tuning pass 2 (snake-first balancing):
+  - Rhythm Serpent increased progression pressure/reward:
+    - survival bonus cadence: 12s -> 8s
+    - stronger survival and food formulas
+    - length-milestone bonuses every +3 segments from length 6
+    - higher power-up rewards including guitar-solo pickup reward.
+  - Mosh Pit Pac-Man runaway dampening:
+    - power-pellet fright duration reduced to 4.2s
+    - ghost chain payout reduced and capped lower.
+  - Amp Invaders spike trimming:
+    - reduced charge, kill, disco, wave-clear, boss-entry, and boss-defeat payouts.
+
+- Focused simulation results:
+  - Baseline balanced (10 runs): `output/simulations/tune-pass-baseline-balanced10.json`
+    - stage share ~ S1 4.1% / S2 28.3% / S3 67.6%
+  - After focused tuning balanced (10 runs): `output/simulations/tune-pass-focused-balanced10.json`
+    - stage share ~ S1 14.8% / S2 26.8% / S3 58.5%
+  - Specialist sanity (3 runs/profile): `output/simulations/tune-pass-focused-specialists3.json`
+    - snake-specialist average share ~ S1 34.7% / S2 26.7% / S3 38.6%
+    - amp-specialist average share ~ S1 11.1% / S2 18.6% / S3 70.3%
+
+- Simulation reporting now includes both base stage-sum score and final score with time bonus.

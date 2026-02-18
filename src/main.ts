@@ -683,7 +683,8 @@ function createRhythmSerpentStage(): StageRuntime {
   let moveMs = 0;
   let stageMs = 0;
   let score = 0;
-  let nextSurvivalBonusMs = 12_000;
+  let nextSurvivalBonusMs = 8_000;
+  let nextLengthMilestone = 6;
   let dead = false;
   let openingGraceMs = 5500;
   let combo = 0;
@@ -828,9 +829,9 @@ function createRhythmSerpentStage(): StageRuntime {
       enqueueTurnInputs(input);
 
       while (stageMs >= nextSurvivalBonusMs) {
-        const sustainBonus = Math.max(14, 14 + Math.floor((snake.length - 3) * 2.4) + combo * 2);
+        const sustainBonus = Math.max(20, 20 + Math.floor((snake.length - 3) * 3.2) + combo * 3);
         addScore(sustainBonus);
-        nextSurvivalBonusMs += 12_000;
+        nextSurvivalBonusMs += 8_000;
       }
 
       comboTimerMs -= dtMs;
@@ -904,9 +905,13 @@ function createRhythmSerpentStage(): StageRuntime {
           combo = Math.max(1, combo + 1);
           comboTimerMs = 3000;
           const mult = combo >= 8 ? 2.5 : combo >= 5 ? 2 : combo >= 3 ? 1.5 : 1;
-          const baseFoodScore = 16 + combo * 2;
-          const lengthBoost = 1 + Math.max(0, snake.length - 3) * 0.08;
+          const baseFoodScore = 24 + combo * 3;
+          const lengthBoost = 1 + Math.max(0, snake.length - 3) * 0.12;
           addScore(Math.round(baseFoodScore * mult * lengthBoost));
+          if (snake.length >= nextLengthMilestone) {
+            addScore(nextLengthMilestone * 18);
+            nextLengthMilestone += 3;
+          }
           audio.trigger("pickup");
           grew = true;
           for (const milestone of [3, 5, 8, 12]) {
@@ -921,16 +926,17 @@ function createRhythmSerpentStage(): StageRuntime {
         if (power && next.x === power.x && next.y === power.y) {
           if (power.kind === GUITAR_SOLO_POWER_KIND) {
             guitarSoloFxMs = GUITAR_SOLO_BONUS_MS;
+            addScore(140);
             audio.trigger("guitarSolo");
           } else if (power.kind === "bass-drop") {
             timers.bassDropMs = 4500;
-            addScore(55);
+            addScore(80);
           } else if (power.kind === "encore") {
             timers.encoreMs = 4000;
-            addScore(70);
+            addScore(100);
           } else {
             timers.moshBurstMs = 3500;
-            addScore(48);
+            addScore(72);
           }
           if (power.kind !== GUITAR_SOLO_POWER_KIND) {
             audio.trigger("pickup");
@@ -1403,8 +1409,8 @@ function createMoshPitPacmanStage(): StageRuntime {
     if (cell === ".") {
       score += 12;
     } else {
-      score += 60;
-      frightMs = 6000;
+      score += 55;
+      frightMs = 4200;
       guardChain = 0;
     }
     audio.trigger("pickup");
@@ -1490,7 +1496,7 @@ function createMoshPitPacmanStage(): StageRuntime {
       if (guard.x !== player.x || guard.y !== player.y) continue;
       if (frightMs > 0) {
         guardChain += 1;
-        score += 220 * Math.pow(2, Math.min(3, guardChain - 1));
+        score += 140 * Math.pow(2, Math.min(2, guardChain - 1));
         audio.trigger("pickup");
         guard.x = guard.homeX;
         guard.y = guard.homeY;
@@ -2057,7 +2063,7 @@ function createAmpInvadersStage(): StageRuntime {
           damage: chargeMs >= 900 ? 4 : 3,
           enemy: false
         });
-        score += 2;
+        score += 1;
         totalShotsFired += 1;
       }
       wasHoldingAction = input.actionHeld;
@@ -2178,7 +2184,7 @@ function createAmpInvadersStage(): StageRuntime {
               bullet.y = -100;
               if (enemy.hp <= 0) {
                 enemy.alive = false;
-                score += enemy.type === "elite" ? 45 : enemy.type === "armored" ? 22 : 10;
+                score += enemy.type === "elite" ? 40 : enemy.type === "armored" ? 18 : 8;
                 audio.trigger("pickup");
               }
               break;
@@ -2192,14 +2198,14 @@ function createAmpInvadersStage(): StageRuntime {
               bullet.y = -120;
               if (bossDirector.isDefeated() && !bossDefeatAwarded) {
                 bossDefeatAwarded = true;
-                score += 520;
+                score += 480;
                 cleared = true;
               }
             }
           }
 
           if (disco.active && Math.abs(bullet.x - disco.x) < 24 && Math.abs(bullet.y - disco.y) < 16) {
-            score += 140;
+            score += 120;
             disco.active = false;
             discoTimerMs = 10_000;
             audio.trigger("pickup");
@@ -2249,14 +2255,14 @@ function createAmpInvadersStage(): StageRuntime {
           bossDirector.enter();
           specialsState.entities.length = 0;
           enemyFireCooldownMs = 420;
-          score += 180;
+          score += 160;
         } else {
           waveState = waveDirector.advanceOnWaveClear();
           wave = waveState.wave;
           genre = waveState.genre;
           spreadTier = waveState.spreadTier;
           nextUpgradeWave = waveState.nextUpgradeWave;
-          score += 80;
+          score += 70;
           enemies = spawnWave(wave);
           enemyDir = 1;
         }

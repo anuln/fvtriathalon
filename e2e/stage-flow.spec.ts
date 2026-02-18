@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("stage transition uses a single summary screen with explicit raw and tri labels", async ({ page }) => {
+test("stage transition uses a single summary screen with score labels", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("http://127.0.0.1:4173/");
   await page.getByTestId("start").click();
@@ -15,10 +15,14 @@ test("stage transition uses a single summary screen with explicit raw and tri la
   await expect(page.getByText("Move to Next Stage?")).toHaveCount(0);
   await expect(page.getByText("Stage 1 Complete")).toBeVisible();
   const summaryCard = page.locator("#overlay .card");
-  await expect(summaryCard.getByText("Stage Raw Score:")).toBeVisible();
-  await expect(summaryCard.getByText("Stage Tri Points:")).toBeVisible();
-  await expect(summaryCard.getByText("Total Tri Points:")).toBeVisible();
+  await expect(summaryCard.getByText("Stage Score:")).toBeVisible();
+  await expect(summaryCard.getByText("Total Score:")).toBeVisible();
+  const stageScoreText = (await summaryCard.getByText(/Stage Score:/).textContent()) ?? "";
+  const totalScoreText = (await summaryCard.getByText(/Total Score:/).textContent()) ?? "";
+  const stageScore = Number(stageScoreText.replace(/[^\d-]/g, ""));
+  const totalScore = Number(totalScoreText.replace(/[^\d-]/g, ""));
+  expect(totalScore).toBe(stageScore);
 
   await page.getByRole("button", { name: "CONTINUE" }).click();
-  await expect(page.getByText("Stage 2/3")).toBeVisible();
+  await expect(page.getByText("S2/3")).toBeVisible();
 });
