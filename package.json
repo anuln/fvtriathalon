@@ -9,7 +9,9 @@
     "test": "vitest run",
     "test:e2e": "sh -c 'vite --host 127.0.0.1 --port 4173 >/tmp/retro-arcade-e2e.log 2>&1 & SERVER_PID=$!; trap \"kill $SERVER_PID\" EXIT; sleep 2; playwright test \"$@\"' --",
     "lint": "eslint .",
-    "audio:lyria": "node scripts/generate-lyria-assets.mjs"
+    "audio:lyria": "node scripts/generate-lyria-assets.mjs",
+    "sim:quick": "node scripts/simulate-score-balance.mjs --runs 8 --profile balanced",
+    "sim:batch": "node scripts/simulate-score-balance.mjs --runs 20 --profiles balanced,snake-specialist,pac-specialist,amp-specialist,casual"
   },
   "dependencies": {
     "@google/genai": "^1.41.0",

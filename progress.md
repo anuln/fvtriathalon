@@ -369,3 +369,92 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
     - `npm run test -- tests/games/amp-invaders/stage3v2Config.test.ts tests/games/amp-invaders/stage3v2BalanceConfig.test.ts tests/games/amp-invaders/enemyDirector.test.ts tests/games/amp-invaders/specials.test.ts tests/games/amp-invaders/bossDirector.test.ts tests/games/amp-invaders/collision.test.ts`: pass
     - `npm run test:e2e -- e2e/amp-autofire.spec.ts`: pass (9 passed)
     - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts e2e/stage-flow.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (22 passed)
+
+- Rhythm Serpent guitar-solo power-up prototype pass:
+  - Added new power-up surface module with sprite metadata:
+    - `src/games/rhythm-serpent/guitarSoloPowerup.ts`
+    - `tests/games/rhythm-serpent/guitarSoloPowerup.test.ts` (TDD RED->GREEN)
+  - Added pixel sprite asset generated from the provided guitar concept:
+    - `assets/sprites/rhythm-serpent-guitar-solo.png`
+  - Wired new `guitar-solo` power-up into `createRhythmSerpentStage` in `src/main.ts`:
+    - spawn pool now includes `guitar-solo`
+    - pickup is visual-only (no score/timer buffs)
+    - 3s visual FX burst (`guitarSoloMs`) and HUD state (`GUITAR SOLO!`)
+    - sprite rendering for guitar power-up (PNG with pixel fallback map)
+    - debug state now includes `pendingPowerKind` and `guitarSoloMs`
+    - added deterministic debug flag for QA: `?forceGuitarSoloPower=1`
+  - Audio wiring in `src/main.ts`:
+    - new trigger kind: `guitarSolo`
+    - sample loader for `assets/audio/lyria2/oneshot_guitar_solo.wav`
+    - playback path uses sample when available; synth riff fallback otherwise
+  - Lyria pipeline updates:
+    - added `oneshot_guitar_solo` task in `scripts/generate-lyria-assets.mjs` (target 3000ms)
+    - added matching prompt in `assets/audio/lyria2-prompts.md`
+    - generated asset: `assets/audio/lyria2/oneshot_guitar_solo.wav` (3.000s, 48kHz stereo)
+- Verification (fresh):
+  - `npm run test -- tests/games/rhythm-serpent/guitarSoloPowerup.test.ts tests/games/rhythm-serpent/rhythmSerpentRules.test.ts`: pass
+  - `npm run build`: pass
+  - `npm run test`: pass
+  - `npm run lint`: pass
+  - develop-web-game Playwright captures:
+    - `output/web-game/guitar-solo-pass2` confirms `pendingPowerKind: "guitar-solo"` and sprite visible
+    - `output/web-game/guitar-solo-pass4` confirms pickup consumed (`pendingPowerKind: null`) and `guitarSoloMs > 0`
+
+- Scoring clarity + simulation foundation pass (2026-02-18):
+  - Added explicit raw-vs-tri language in runtime UI (`src/main.ts`):
+    - HUD now shows `Stage Raw` and `Stage Tri`.
+    - Top rail now shows banked tri points plus live projected tri total while in-stage.
+    - Transition card now uses `Stage Raw Score`, `Stage Tri Points`, and `Total Tri Points` labels.
+    - Fixed triathlon wording typo from `Triathalon` -> `Triathlon` in updated labels.
+  - Added tri-debug payload fields in `render_game_to_text`:
+    - `bankedRaw`, `stageTriPreview`, `projectedTriTotal`.
+  - Extended stage debug state for simulations:
+    - Rhythm Serpent: includes `food` and `power` locations.
+    - Mosh Pit Pac-Man: includes `pelletsRemaining`.
+    - Amp Invaders: includes `enemyMinX`, `enemyMaxX`, and `enemyCenterNorm`.
+
+- Scoring normalization rebalance:
+  - Updated `src/domain/scoring.ts` K-values:
+    - rhythm-serpent: `1600`
+    - moshpit-pacman: `2500`
+    - amp-invaders: `2800`
+  - Added test coverage in `tests/domain/scoring.test.ts` ensuring snake conversion is more favorable than pac/amp for same raw and all caps remain bounded.
+
+- Duration-config support for simulation:
+  - Added `src/domain/runConfig.ts` (`resolveRunTotalMs`) with `?runMinutes=<value>` override.
+  - Wired `RUN_TOTAL_MS` in runtime to URL query parsing.
+  - Added tests: `tests/domain/runConfig.test.ts`.
+
+- Playwright simulation harness setup:
+  - Added `scripts/simulate-score-balance.mjs`:
+    - seeded simulation runs
+    - profiles: balanced/casual/snake-specialist/pac-specialist/amp-specialist
+    - stage-time budgeting + profile variability
+    - retry-on-low-score behavior to mimic iterative human play
+    - outputs per-run and aggregate summary JSON
+  - Added npm scripts:
+    - `sim:quick`
+    - `sim:batch`
+  - Added usage + balancing loop doc:
+    - `docs/plans/2026-02-18-scoring-sim-playbook.md`
+  - Added implementation plan doc:
+    - `docs/plans/2026-02-18-scoring-balance-simulation-plan.md`
+
+- E2E updates:
+  - Updated label assertions in:
+    - `e2e/stage-flow.spec.ts`
+    - `e2e/triathlon-flow.spec.ts`
+
+- Verification (fresh):
+  - `npm run test`: pass (30 files, 64 tests)
+  - `npm run lint`: pass
+  - `npm run build`: pass
+  - `npm run test:e2e -- e2e/stage-flow.spec.ts e2e/triathlon-flow.spec.ts`: pass
+  - Simulation command smoke:
+    - `npm run sim:quick -- --url http://127.0.0.1:4173 --runs 1 --out output/simulations/simquick-smoke.json`: pass
+    - additional direct smoke artifacts in `output/simulations/smoke.json`, `output/simulations/smoke2.json`, `output/simulations/smoke3.json`
+
+- Next balancing TODOs:
+  - Improve simulation policy quality for Snake/Pac pathing so specialists can reliably express high-skill score ceilings.
+  - Run `sim:batch` at 6 / 7.5 / 9 minutes and compare completion rate + stage tri-share variance.
+  - Tune `src/domain/scoring.ts` K-values iteratively against those simulation distributions.

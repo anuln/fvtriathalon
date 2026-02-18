@@ -1,9 +1,9 @@
 export const TOTAL_TRI_MAX = 3600;
 
 const STAGE_K = {
-  "rhythm-serpent": 2400,
-  "moshpit-pacman": 2100,
-  "amp-invaders": 1900
+  "rhythm-serpent": 1600,
+  "moshpit-pacman": 2500,
+  "amp-invaders": 2800
 } as const;
 
 type StageId = keyof typeof STAGE_K;
