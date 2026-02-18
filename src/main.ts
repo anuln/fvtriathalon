@@ -1,4 +1,4 @@
-import { toTriPoints } from "./domain/scoring";
+import { computeFinalScore, computeStageScore } from "./domain/scoring";
 import { getStageBeatPulse } from "./domain/beatPulse";
 import { computeRhythmSerpentGrid } from "./domain/rhythmSerpentLayout";
 import {
@@ -41,8 +41,11 @@ import { createBossDirector } from "./games/amp-invaders/bossDirector";
 import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specials";
 import { createZoneMusicState, updateZoneMusicState } from "./games/moshpit-pacman/zoneMusicState";
 import {
+  applyGuitarSoloScoreMultiplier,
+  GUITAR_SOLO_BONUS_MS,
   GUITAR_SOLO_PALETTE,
   GUITAR_SOLO_POWER_KIND,
+  GUITAR_SOLO_SCORE_MULTIPLIER,
   GUITAR_SOLO_SPRITE,
   RHYTHM_SERPENT_POWER_KINDS,
   type RhythmSerpentPowerKind
@@ -166,7 +169,6 @@ let deathPauseRemainingMs = 0;
 let transitionRemainingMs = 0;
 let transitionCommittedStageIndex = 0;
 let transitionStageRawScore = 0;
-let transitionStageBankedScore = 0;
 let transitionTotalScore = 0;
 let submittedScore = false;
 let frameWidth = 960;
@@ -417,7 +419,7 @@ function syncHud(): void {
       : compactHud
       ? `S${flow.currentStageIndex + 1}/3`
       : `Stage ${flow.currentStageIndex + 1}/3`;
-  hudScore.textContent = `Stage: ${Math.round(flow.stageRaw)} • Total: ${totalBankedTri()}`;
+  hudScore.textContent = `Stage: ${Math.round(flow.stageRaw)} • Total: ${totalBankedScore()}`;
 }
 
 function syncCommitButton(): void {
@@ -433,7 +435,7 @@ function syncOverlay(): void {
       <div class="card attract" data-secret-hold="true">
         <p class="eyebrow">NEON TOURNAMENT BROADCAST</p>
         <h1 class="title-stack"><span>FESTIVERSE</span><span>ARCADE TRIATHLON</span></h1>
-        <p class="strap">3 games. One clock. One total tri score.</p>
+        <p class="strap">3 games. One clock. One total score.</p>
         <p class="muted">Tap to enable audio and begin the set.</p>
         <button class="btn primary" data-testid="start" data-action="start-run">START</button>
         <div class="stage-pill-row">
@@ -467,9 +469,8 @@ function syncOverlay(): void {
     markup = `
       <div class="card">
         <h2>Stage ${transitionCommittedStageIndex + 1} Complete</h2>
-        <p>Stage Raw Score: ${Math.round(transitionStageRawScore)}</p>
-        <p>Stage Tri Points: +${transitionStageBankedScore}</p>
-        <p>Total Tri Points: ${transitionTotalScore}</p>
+        <p>Stage Score: ${Math.round(transitionStageRawScore)}</p>
+        <p>Total Score: ${transitionTotalScore}</p>
         <p class="muted">Next: ${nextLabel}</p>
         <div class="row">
           <button class="btn primary" data-action="continue-stage">CONTINUE</button>
@@ -477,11 +478,14 @@ function syncOverlay(): void {
       </div>
     `;
   } else if (mode === "results") {
+    const summary = finalScoreSummary();
     const splits = flow.bankedTri.map((value, idx) => `<li>${STAGE_NAMES[idx]}: ${value}</li>`).join("");
     markup = `
       <div class="card results">
-        <h2>FINAL TRIATHLON TRI POINTS</h2>
-        <p class="score">${totalBankedTri()}</p>
+        <h2>FINAL SCORE</h2>
+        <p class="score">${summary.totalScore}</p>
+        <p>Base Score: ${summary.baseScore}</p>
+        <p>Time Bonus: +${summary.timeBonus}</p>
         <ul>${splits}</ul>
         <div class="row">
           <button class="btn primary" data-action="submit-score">${submittedScore ? "SUBMITTED" : "SUBMIT TO LEADERBOARD"}</button>
@@ -589,11 +593,11 @@ function commitCurrentStage(skipTransition: boolean): void {
   }
   const stageId = STAGE_IDS[flow.currentStageIndex];
   const raw = Math.max(0, stage.getRawScore());
-  const tri = Math.round(toTriPoints(stageId, raw));
+  const stageScore = computeStageScore(stageId, raw);
   flow.stageRaw = raw;
   const fromIndex = flow.currentStageIndex;
 
-  advanceStage(flow, tri);
+  advanceStage(flow, stageScore);
   audio.trigger("commit");
 
   if (fromIndex >= STAGE_IDS.length - 1) {
@@ -609,9 +613,8 @@ function commitCurrentStage(skipTransition: boolean): void {
   }
 
   transitionCommittedStageIndex = fromIndex;
-  transitionStageRawScore = raw;
-  transitionStageBankedScore = tri;
-  transitionTotalScore = totalBankedTri();
+  transitionStageRawScore = stageScore;
+  transitionTotalScore = totalBankedScore();
   transitionRemainingMs = 2000;
   mode = "transition";
 }
@@ -619,39 +622,35 @@ function commitCurrentStage(skipTransition: boolean): void {
 function forceEndRunByClock(): void {
   const stageId = STAGE_IDS[flow.currentStageIndex];
   const raw = Math.max(0, stage.getRawScore());
-  const tri = Math.round(toTriPoints(stageId, raw));
+  const stageScore = computeStageScore(stageId, raw);
   flow.stageRaw = raw;
   flow.bankedRaw[flow.currentStageIndex] = raw;
-  flow.bankedTri[flow.currentStageIndex] = tri;
+  flow.bankedTri[flow.currentStageIndex] = stageScore;
   runActive = false;
   mode = "results";
 }
 
-function totalBankedTri(): number {
+function totalBankedScore(): number {
   return flow.bankedTri.reduce((sum, score) => sum + score, 0);
 }
 
-function currentStageTriPreview(): number {
-  const stageId = STAGE_IDS[flow.currentStageIndex];
-  if (!stageId) {
-    return 0;
-  }
-  return Math.round(toTriPoints(stageId, Math.max(0, flow.stageRaw)));
+function runMsLeft(): number {
+  return Math.max(0, RUN_TOTAL_MS - globalElapsedMs);
 }
 
-function projectedTriTotal(): number {
-  const currentBanked = flow.bankedTri[flow.currentStageIndex] ?? 0;
-  return totalBankedTri() - currentBanked + currentStageTriPreview();
+function finalScoreSummary(): { baseScore: number; timeBonus: number; totalScore: number } {
+  return computeFinalScore(flow.bankedTri, runMsLeft());
 }
 
 function submitCurrentRunScore(): void {
   if (submittedScore) {
     return;
   }
+  const summary = finalScoreSummary();
   const splits = [...flow.bankedTri];
   saveScore({
     player: "YOU",
-    total: totalBankedTri(),
+    total: summary.totalScore,
     splits
   });
   audio.trigger("submit");
@@ -684,6 +683,7 @@ function createRhythmSerpentStage(): StageRuntime {
   let moveMs = 0;
   let stageMs = 0;
   let score = 0;
+  let nextSurvivalBonusMs = 12_000;
   let dead = false;
   let openingGraceMs = 5500;
   let combo = 0;
@@ -813,6 +813,10 @@ function createRhythmSerpentStage(): StageRuntime {
     if (input.down) enqueueTurnIntent(turnAssist, "down", stageMs);
   }
 
+  function addScore(delta: number): void {
+    score += applyGuitarSoloScoreMultiplier(delta, guitarSoloFxMs);
+  }
+
   return {
     id: "rhythm-serpent",
     update(dtMs, input) {
@@ -822,6 +826,12 @@ function createRhythmSerpentStage(): StageRuntime {
       stageMs += dtMs;
       openingGraceMs = Math.max(0, openingGraceMs - dtMs);
       enqueueTurnInputs(input);
+
+      while (stageMs >= nextSurvivalBonusMs) {
+        const sustainBonus = Math.max(14, 14 + Math.floor((snake.length - 3) * 2.4) + combo * 2);
+        addScore(sustainBonus);
+        nextSurvivalBonusMs += 12_000;
+      }
 
       comboTimerMs -= dtMs;
       if (comboTimerMs <= 0) {
@@ -894,7 +904,9 @@ function createRhythmSerpentStage(): StageRuntime {
           combo = Math.max(1, combo + 1);
           comboTimerMs = 3000;
           const mult = combo >= 8 ? 2.5 : combo >= 5 ? 2 : combo >= 3 ? 1.5 : 1;
-          score += Math.round(12 * mult);
+          const baseFoodScore = 16 + combo * 2;
+          const lengthBoost = 1 + Math.max(0, snake.length - 3) * 0.08;
+          addScore(Math.round(baseFoodScore * mult * lengthBoost));
           audio.trigger("pickup");
           grew = true;
           for (const milestone of [3, 5, 8, 12]) {
@@ -908,17 +920,17 @@ function createRhythmSerpentStage(): StageRuntime {
 
         if (power && next.x === power.x && next.y === power.y) {
           if (power.kind === GUITAR_SOLO_POWER_KIND) {
-            guitarSoloFxMs = 3000;
+            guitarSoloFxMs = GUITAR_SOLO_BONUS_MS;
             audio.trigger("guitarSolo");
           } else if (power.kind === "bass-drop") {
             timers.bassDropMs = 4500;
-            score += 35;
+            addScore(55);
           } else if (power.kind === "encore") {
             timers.encoreMs = 4000;
-            score += 45;
+            addScore(70);
           } else {
             timers.moshBurstMs = 3500;
-            score += 30;
+            addScore(48);
           }
           if (power.kind !== GUITAR_SOLO_POWER_KIND) {
             audio.trigger("pickup");
@@ -1161,7 +1173,7 @@ function createRhythmSerpentStage(): StageRuntime {
       });
 
       if (guitarSoloFxMs > 0) {
-        const life = guitarSoloFxMs / 3000;
+        const life = guitarSoloFxMs / GUITAR_SOLO_BONUS_MS;
         const fade = 1 - life;
         const head = snake[0];
         const hx = offX + (head?.x ?? 0) * cell + cell * 0.5;
@@ -1267,7 +1279,7 @@ function createRhythmSerpentStage(): StageRuntime {
     getHudHint() {
       const active =
         guitarSoloFxMs > 0
-          ? "GUITAR SOLO!"
+          ? `GUITAR SOLO ${GUITAR_SOLO_SCORE_MULTIPLIER}X`
           : timers.encoreMs > 0
           ? "ENCORE"
           : timers.bassDropMs > 0
@@ -1287,7 +1299,11 @@ function createRhythmSerpentStage(): StageRuntime {
         combo,
         snakeLength: snake.length,
         pendingPowerKind: power?.kind ?? null,
-        powerActive: { ...timers, guitarSoloMs: guitarSoloFxMs },
+        powerActive: {
+          ...timers,
+          guitarSoloMs: guitarSoloFxMs,
+          guitarSoloMultiplier: guitarSoloFxMs > 0 ? GUITAR_SOLO_SCORE_MULTIPLIER : 1
+        },
         turnTelemetry: readTurnAssistTelemetry(turnAssist)
       };
     }
@@ -1385,9 +1401,9 @@ function createMoshPitPacmanStage(): StageRuntime {
     const zone = zoneIndex(x, y);
     zoneCollected[zone] += 1;
     if (cell === ".") {
-      score += 10;
+      score += 12;
     } else {
-      score += 50;
+      score += 60;
       frightMs = 6000;
       guardChain = 0;
     }
@@ -1404,7 +1420,7 @@ function createMoshPitPacmanStage(): StageRuntime {
       }
     }
     level += 1;
-    score += 300;
+    score += 260;
     recomputeZoneTotals();
   }
 
@@ -1474,7 +1490,7 @@ function createMoshPitPacmanStage(): StageRuntime {
       if (guard.x !== player.x || guard.y !== player.y) continue;
       if (frightMs > 0) {
         guardChain += 1;
-        score += 200 * Math.pow(2, Math.min(3, guardChain - 1));
+        score += 220 * Math.pow(2, Math.min(3, guardChain - 1));
         audio.trigger("pickup");
         guard.x = guard.homeX;
         guard.y = guard.homeY;
@@ -2041,7 +2057,7 @@ function createAmpInvadersStage(): StageRuntime {
           damage: chargeMs >= 900 ? 4 : 3,
           enemy: false
         });
-        score += 5;
+        score += 2;
         totalShotsFired += 1;
       }
       wasHoldingAction = input.actionHeld;
@@ -2162,7 +2178,7 @@ function createAmpInvadersStage(): StageRuntime {
               bullet.y = -100;
               if (enemy.hp <= 0) {
                 enemy.alive = false;
-                score += enemy.type === "elite" ? 60 : enemy.type === "armored" ? 30 : 15;
+                score += enemy.type === "elite" ? 45 : enemy.type === "armored" ? 22 : 10;
                 audio.trigger("pickup");
               }
               break;
@@ -2176,14 +2192,14 @@ function createAmpInvadersStage(): StageRuntime {
               bullet.y = -120;
               if (bossDirector.isDefeated() && !bossDefeatAwarded) {
                 bossDefeatAwarded = true;
-                score += 900;
+                score += 520;
                 cleared = true;
               }
             }
           }
 
           if (disco.active && Math.abs(bullet.x - disco.x) < 24 && Math.abs(bullet.y - disco.y) < 16) {
-            score += 220;
+            score += 140;
             disco.active = false;
             discoTimerMs = 10_000;
             audio.trigger("pickup");
@@ -2233,14 +2249,14 @@ function createAmpInvadersStage(): StageRuntime {
           bossDirector.enter();
           specialsState.entities.length = 0;
           enemyFireCooldownMs = 420;
-          score += 300;
+          score += 180;
         } else {
           waveState = waveDirector.advanceOnWaveClear();
           wave = waveState.wave;
           genre = waveState.genre;
           spreadTier = waveState.spreadTier;
           nextUpgradeWave = waveState.nextUpgradeWave;
-          score += 120;
+          score += 80;
           enemies = spawnWave(wave);
           enemyDir = 1;
         }
@@ -3843,18 +3859,22 @@ function createAudioEngine() {
   };
 }
 function renderGameToText(): string {
+  const summary = finalScoreSummary();
   return JSON.stringify({
     mode,
     stageIndex: flow.currentStageIndex,
     stageName: STAGE_NAMES[flow.currentStageIndex] ?? "complete",
-    runMsLeft: Math.max(0, RUN_TOTAL_MS - globalElapsedMs),
+    runMsLeft: runMsLeft(),
     canCommit: canCommitNow(flow),
     bankedRaw: [...flow.bankedRaw],
+    bankedScores: [...flow.bankedTri],
     bankedTri: [...flow.bankedTri],
     stageRaw: Math.round(flow.stageRaw),
-    stageTriPreview: currentStageTriPreview(),
-    projectedTriTotal: projectedTriTotal(),
-    totalTri: totalBankedTri(),
+    stageScore: Math.round(flow.stageRaw),
+    totalScore: totalBankedScore(),
+    timeBonus: summary.timeBonus,
+    finalScore: summary.totalScore,
+    totalTri: totalBankedScore(),
     theme: activeTheme.id,
     stageState: stage.debugState()
   });
