@@ -1,0 +1,6 @@
+Create ONE game-ready 2D projectile sprite for a rock shooter player bullet.
+Subject: "Riff Blade Bolt" - bright white-gold guitar-pick blade projectile with slight electric halo.
+Style: retro pixel-art, crisp silhouette, no blur.
+Palette: white, gold, cyan electric edge.
+Background: plain neutral background only.
+Output: one centered projectile sprite.

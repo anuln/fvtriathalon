@@ -1,0 +1,7 @@
+Create ONE game-ready 2D sprite for a hip-hop festival shooter enemy.
+Subject: "Turntable Raider" - hovering deck unit with spinning platter halo and armored tonearm blade.
+Style: retro pixel-art, hard-edged shape, readable at small size, no blur.
+Palette: graphite, bronze, crimson accent, cyan light ticks.
+Mood: heavy groove menace.
+Background: plain neutral background only, no text.
+Output: one centered sprite.

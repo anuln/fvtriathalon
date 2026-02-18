@@ -40,6 +40,7 @@ import { createEnemyDirector } from "./games/amp-invaders/enemyDirector";
 import { createBossDirector } from "./games/amp-invaders/bossDirector";
 import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specials";
 import { pickWave1EnemyVariant, type Wave1EnemyVariant } from "./games/amp-invaders/wave1SpriteRoster";
+import { ZONE_LEVEL_STEP, computeZoneCompletionBonus, zonesReadyForRespawn } from "./games/moshpit-pacman/zoneCycle";
 import { createZoneMusicState, updateZoneMusicState } from "./games/moshpit-pacman/zoneMusicState";
 import {
   applyGuitarSoloScoreMultiplier,
@@ -1388,7 +1389,8 @@ function createMoshPitPacmanStage(): StageRuntime {
   const rows = map.length;
   const cols = map[0].length;
 
-  let player = { x: 1, y: 1, dir: "right" as Dir, want: "right" as Dir };
+  const playerSpawn = { x: 1, y: 1 };
+  let player = { x: playerSpawn.x, y: playerSpawn.y, dir: "right" as Dir, want: "right" as Dir };
   let moveMs = 0;
   let guardMoveMs = 0;
   let stageMs = 0;
@@ -1397,20 +1399,25 @@ function createMoshPitPacmanStage(): StageRuntime {
   let dead = false;
   let level = 1;
   let guardChain = 0;
+  let crowdSaveCharges = 1;
+  let crowdSaveInvulnMs = 0;
+  let zoneCompletionFlashMs = 0;
+  let totalZoneCompletions = 0;
   const turnAssist = createMobileTurnAssistState({
     maxQueue: 3,
     ttlMs: 380,
     blockOppositeTurns: false
   });
 
-  const guards: Array<{ x: number; y: number; dir: Dir; homeX: number; homeY: number }> = [
-    { x: cols - 2, y: 1, dir: "left", homeX: cols - 2, homeY: 1 },
-    { x: cols - 2, y: rows - 2, dir: "up", homeX: cols - 2, homeY: rows - 2 },
-    { x: 1, y: rows - 2, dir: "right", homeX: 1, homeY: rows - 2 }
+  const guards: Array<{ x: number; y: number; dir: Dir; homeX: number; homeY: number; homeDir: Dir }> = [
+    { x: cols - 2, y: 1, dir: "left", homeX: cols - 2, homeY: 1, homeDir: "left" },
+    { x: cols - 2, y: rows - 2, dir: "up", homeX: cols - 2, homeY: rows - 2, homeDir: "up" },
+    { x: 1, y: rows - 2, dir: "right", homeX: 1, homeY: rows - 2, homeDir: "right" }
   ];
 
   const zoneCollected = [0, 0, 0, 0, 0];
   const zoneTotals = [0, 0, 0, 0, 0];
+  const zoneCompletions = [0, 0, 0, 0, 0];
   let zoneMusic = createZoneMusicState(zoneTotals.length);
   let renderCoverageY = 0;
   recomputeZoneTotals();
@@ -1466,17 +1473,16 @@ function createMoshPitPacmanStage(): StageRuntime {
     map[y][x] = " ";
   }
 
-  function refillPellets(): void {
+  function respawnZoneTiles(zone: number): void {
     for (let y = 0; y < rows; y += 1) {
       for (let x = 0; x < cols; x += 1) {
-        if (mapTemplate[y][x] === "." || mapTemplate[y][x] === "o") {
-          map[y][x] = mapTemplate[y][x];
-        }
+        if (zoneIndex(x, y) !== zone) continue;
+        if (mapTemplate[y][x] !== "." && mapTemplate[y][x] !== "o") continue;
+        map[y][x] = mapTemplate[y][x];
       }
     }
-    level += 1;
-    score += 260;
-    recomputeZoneTotals();
+    zoneCollected[zone] = 0;
+    zoneMusic.milestonesByZone[zone] = 0;
   }
 
   function pelletCount(): number {
@@ -1491,7 +1497,7 @@ function createMoshPitPacmanStage(): StageRuntime {
     return count;
   }
 
-  function moveGuard(guard: { x: number; y: number; dir: Dir; homeX: number; homeY: number }): void {
+  function moveGuard(guard: { x: number; y: number; dir: Dir; homeX: number; homeY: number; homeDir: Dir }): void {
     const dirs: Dir[] = ["left", "right", "up", "down"];
     const reverse: Record<Dir, Dir> = { left: "right", right: "left", up: "down", down: "up" };
     const options = dirs.filter((direction) => {
@@ -1530,6 +1536,37 @@ function createMoshPitPacmanStage(): StageRuntime {
     guard.y += move.y;
   }
 
+  function resetAfterCrowdSave(): void {
+    player = { x: playerSpawn.x, y: playerSpawn.y, dir: "right", want: "right" };
+    moveMs = 0;
+    guardMoveMs = 0;
+    guardChain = 0;
+    for (const guard of guards) {
+      guard.x = guard.homeX;
+      guard.y = guard.homeY;
+      guard.dir = guard.homeDir;
+    }
+  }
+
+  function awardAndRespawnCompletedZones(): void {
+    const completed = zonesReadyForRespawn(zoneCollected, zoneTotals);
+    for (const zone of completed) {
+      const zoneTotal = Math.max(1, zoneTotals[zone] ?? 1);
+      const completionCount = zoneCompletions[zone] ?? 0;
+      score += computeZoneCompletionBonus(zoneTotal, completionCount);
+      zoneCompletions[zone] = completionCount + 1;
+      totalZoneCompletions += 1;
+      zoneCompletionFlashMs = 950;
+      audio.trigger("zone");
+      respawnZoneTiles(zone);
+
+      if (totalZoneCompletions % ZONE_LEVEL_STEP === 0) {
+        level += 1;
+        score += 90;
+      }
+    }
+  }
+
   function optionsAt(x: number, y: number): number {
     let count = 0;
     const dirs: Dir[] = ["left", "right", "up", "down"];
@@ -1541,6 +1578,9 @@ function createMoshPitPacmanStage(): StageRuntime {
   }
 
   function checkGuardCollision(): void {
+    if (crowdSaveInvulnMs > 0) {
+      return;
+    }
     for (const guard of guards) {
       if (guard.x !== player.x || guard.y !== player.y) continue;
       if (frightMs > 0) {
@@ -1549,7 +1589,14 @@ function createMoshPitPacmanStage(): StageRuntime {
         audio.trigger("pickup");
         guard.x = guard.homeX;
         guard.y = guard.homeY;
-        guard.dir = "left";
+        guard.dir = guard.homeDir;
+      } else if (crowdSaveCharges > 0) {
+        crowdSaveCharges -= 1;
+        crowdSaveInvulnMs = 1400;
+        zoneCompletionFlashMs = 700;
+        audio.trigger("zone");
+        resetAfterCrowdSave();
+        return;
       } else {
         dead = true;
       }
@@ -1576,6 +1623,8 @@ function createMoshPitPacmanStage(): StageRuntime {
       enqueueTurnInputs(input);
 
       frightMs = Math.max(0, frightMs - dtMs);
+      crowdSaveInvulnMs = Math.max(0, crowdSaveInvulnMs - dtMs);
+      zoneCompletionFlashMs = Math.max(0, zoneCompletionFlashMs - dtMs);
       moveMs += dtMs;
       guardMoveMs += dtMs;
 
@@ -1611,6 +1660,8 @@ function createMoshPitPacmanStage(): StageRuntime {
         checkGuardCollision();
       }
 
+      awardAndRespawnCompletedZones();
+
       const nextZoneMusic = updateZoneMusicState(zoneMusic, zoneCollected, zoneTotals, frightMs);
       if (nextZoneMusic.pendingStingers > 0) {
         const burst = Math.min(2, nextZoneMusic.pendingStingers);
@@ -1619,10 +1670,6 @@ function createMoshPitPacmanStage(): StageRuntime {
         }
       }
       zoneMusic = nextZoneMusic;
-
-      if (pelletCount() === 0) {
-        refillPellets();
-      }
     },
     draw(context, width, height, theme) {
       const zoneColors = ["#ff4444", "#ff8833", "#44ddff", "#cc44ff", "#ffdd44"];
@@ -1759,6 +1806,12 @@ function createMoshPitPacmanStage(): StageRuntime {
         }
       }
 
+      if (zoneCompletionFlashMs > 0) {
+        const life = zoneCompletionFlashMs / 950;
+        context.fillStyle = withAlpha("#ffe26d", 0.08 + life * 0.12);
+        context.fillRect(offX, offY, fieldW, fieldH);
+      }
+
       const playerCenterX = offX + player.x * cellX + cellX * 0.5;
       const playerCenterY = offY + player.y * cellY + cellY * 0.5;
       const playerGlow = context.createRadialGradient(
@@ -1849,6 +1902,13 @@ function createMoshPitPacmanStage(): StageRuntime {
         context.font = "10px monospace";
         context.fillText(zoneNames[i], x + 4, zoneBarY - 4);
       }
+
+      context.fillStyle = theme.palette.text;
+      context.font = "10px monospace";
+      context.textAlign = "right";
+      const saveStatus = crowdSaveCharges > 0 ? "SAVE READY" : crowdSaveInvulnMs > 0 ? "RECOVERING" : "SAVE SPENT";
+      context.fillText(saveStatus, offX + fieldW - 2, zoneBarY - 4);
+      context.textAlign = "left";
     },
     getRawScore() {
       return score;
@@ -1858,15 +1918,19 @@ function createMoshPitPacmanStage(): StageRuntime {
     },
     getHudHint() {
       if (frightMs > 0) {
-        return `Backstage Pass Active • Chase security • Groove ${Math.round(zoneMusic.intensity * 100)}%`;
+        return `Backstage Pass Active • Chase security • Save ${crowdSaveCharges > 0 ? "Ready" : "Spent"}`;
       }
-      return `Collect picks. Clear zones. Groove ${Math.round(zoneMusic.intensity * 100)}%`;
+      return `Collect picks. Complete zones for bonus. Save ${crowdSaveCharges > 0 ? "Ready" : "Spent"}`;
     },
     debugState() {
       return {
         level,
         frightMs,
+        crowdSaveCharges,
+        crowdSaveInvulnMs,
         pelletsRemaining: pelletCount(),
+        zoneCompletions: [...zoneCompletions],
+        totalZoneCompletions,
         renderCoverageY,
         musicLayers: zoneMusic.activeLayers,
         musicIntensity: zoneMusic.intensity,
@@ -1881,15 +1945,94 @@ function createMoshPitPacmanStage(): StageRuntime {
 }
 
 function createAmpInvadersStage(): StageRuntime {
+  type EnemySpriteVariant =
+    | "w1_baseline"
+    | "w1_variant2"
+    | "w1_variant3"
+    | "w1_variant4"
+    | "w2_variant1"
+    | "w2_variant2"
+    | "w2_variant3"
+    | "w3_variant1"
+    | "w3_variant2"
+    | "w3_variant3";
+  type BulletSpriteKey = "w1_player" | "w1_enemy" | "w2_player" | "w2_enemy" | "w3_player" | "w3_enemy" | "w4_player" | "w4_enemy";
   type Enemy = {
     x: number;
     y: number;
     type: "basic" | "armored" | "elite";
     hp: number;
     alive: boolean;
-    wave1Variant: Wave1EnemyVariant | null;
+    spriteVariant: EnemySpriteVariant | null;
   };
   type Bullet = { x: number; y: number; vx: number; vy: number; damage: number; enemy: boolean };
+  const AMP_WAVE2_ENEMY_VARIANT1_URL = new URL("../assets/sprites/generated/wave2_enemy_variant1_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE2_ENEMY_VARIANT2_URL = new URL("../assets/sprites/generated/wave2_enemy_variant2_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE2_ENEMY_VARIANT3_URL = new URL("../assets/sprites/generated/wave2_enemy_variant3_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE3_ENEMY_VARIANT1_URL = new URL("../assets/sprites/generated/wave3_enemy_variant1_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE3_ENEMY_VARIANT2_URL = new URL("../assets/sprites/generated/wave3_enemy_variant2_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE3_ENEMY_VARIANT3_URL = new URL("../assets/sprites/generated/wave3_enemy_variant3_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE1_BULLET_ENEMY_URL = new URL("../assets/sprites/generated/wave1_bullet_enemy_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE2_BULLET_PLAYER_URL = new URL("../assets/sprites/generated/wave2_bullet_player_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE2_BULLET_ENEMY_URL = new URL("../assets/sprites/generated/wave2_bullet_enemy_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE3_BULLET_PLAYER_URL = new URL("../assets/sprites/generated/wave3_bullet_player_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE3_BULLET_ENEMY_URL = new URL("../assets/sprites/generated/wave3_bullet_enemy_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE4_BULLET_PLAYER_URL = new URL("../assets/sprites/generated/wave4_bullet_player_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE4_BULLET_ENEMY_URL = new URL("../assets/sprites/generated/wave4_bullet_enemy_test-transparent.png", import.meta.url).href;
+  const AMP_WAVE4_BOSS_URL = new URL("../assets/sprites/generated/wave4_boss_test-transparent.png", import.meta.url).href;
+  const ampEnemyImages: Record<EnemySpriteVariant, HTMLImageElement> = {
+    w1_baseline: ampWave1EnemyImages.baseline,
+    w1_variant2: ampWave1EnemyImages.variant2,
+    w1_variant3: ampWave1EnemyImages.variant3,
+    w1_variant4: ampWave1EnemyImages.variant4,
+    w2_variant1: createOptionalImage(AMP_WAVE2_ENEMY_VARIANT1_URL),
+    w2_variant2: createOptionalImage(AMP_WAVE2_ENEMY_VARIANT2_URL),
+    w2_variant3: createOptionalImage(AMP_WAVE2_ENEMY_VARIANT3_URL),
+    w3_variant1: createOptionalImage(AMP_WAVE3_ENEMY_VARIANT1_URL),
+    w3_variant2: createOptionalImage(AMP_WAVE3_ENEMY_VARIANT2_URL),
+    w3_variant3: createOptionalImage(AMP_WAVE3_ENEMY_VARIANT3_URL)
+  };
+  const ampBulletImages: Record<BulletSpriteKey, HTMLImageElement> = {
+    w1_player: ampWave1BulletImage,
+    w1_enemy: createOptionalImage(AMP_WAVE1_BULLET_ENEMY_URL),
+    w2_player: createOptionalImage(AMP_WAVE2_BULLET_PLAYER_URL),
+    w2_enemy: createOptionalImage(AMP_WAVE2_BULLET_ENEMY_URL),
+    w3_player: createOptionalImage(AMP_WAVE3_BULLET_PLAYER_URL),
+    w3_enemy: createOptionalImage(AMP_WAVE3_BULLET_ENEMY_URL),
+    w4_player: createOptionalImage(AMP_WAVE4_BULLET_PLAYER_URL),
+    w4_enemy: createOptionalImage(AMP_WAVE4_BULLET_ENEMY_URL)
+  };
+  const ampWave4BossImage = createOptionalImage(AMP_WAVE4_BOSS_URL);
+
+  function getWaveCycleForSprites(value: number): 1 | 2 | 3 | 4 {
+    const normalized = Math.max(1, Math.floor(value));
+    return ((((normalized - 1) % 4) + 4) % 4) + 1 as 1 | 2 | 3 | 4;
+  }
+
+  function pickEnemyVariantForWaveLocal(level: number, slotIndex: number): EnemySpriteVariant | null {
+    const cycle = getWaveCycleForSprites(level);
+    if (cycle === 1) {
+      const items: EnemySpriteVariant[] = ["w1_baseline", "w1_variant2", "w1_variant3", "w1_variant4"];
+      return items[((slotIndex % items.length) + items.length) % items.length] ?? "w1_baseline";
+    }
+    if (cycle === 2) {
+      const items: EnemySpriteVariant[] = ["w2_variant1", "w2_variant2", "w2_variant3"];
+      return items[((slotIndex % items.length) + items.length) % items.length] ?? "w2_variant1";
+    }
+    if (cycle === 3) {
+      const items: EnemySpriteVariant[] = ["w3_variant1", "w3_variant2", "w3_variant3"];
+      return items[((slotIndex % items.length) + items.length) % items.length] ?? "w3_variant1";
+    }
+    return null;
+  }
+
+  function getBulletSpriteKeysForWaveLocal(level: number): { player: BulletSpriteKey; enemy: BulletSpriteKey } {
+    const cycle = getWaveCycleForSprites(level);
+    if (cycle === 1) return { player: "w1_player", enemy: "w1_enemy" };
+    if (cycle === 2) return { player: "w2_player", enemy: "w2_enemy" };
+    if (cycle === 3) return { player: "w3_player", enemy: "w3_enemy" };
+    return { player: "w4_player", enemy: "w4_enemy" };
+  }
 
   let score = 0;
   let dead = false;
@@ -1921,6 +2064,8 @@ function createAmpInvadersStage(): StageRuntime {
   const shields = [100, 100, 100];
   let enemyDir = 1;
   let enemySpeed = 40;
+  let needsFormationFit = true;
+  let lastFormationFitWidth = 0;
   let enemies: Enemy[] = spawnWave(wave);
   let totalShotsFired = 0;
   let totalEnemyShotsFired = 0;
@@ -1952,11 +2097,12 @@ function createAmpInvadersStage(): StageRuntime {
           type,
           hp: Math.max(1, Math.round((baseHp + hpBoost) * Math.max(1, aggression.bulletSpeedScale * 0.92))),
           alive: true,
-          wave1Variant: level === 1 ? pickWave1EnemyVariant(slotIndex) : null
+          spriteVariant: pickEnemyVariantForWaveLocal(level, slotIndex)
         });
       }
     }
     enemySpeed = (40 + level * 8) * waveSpec.speedScale;
+    needsFormationFit = true;
     return list;
   }
 
@@ -1989,6 +2135,16 @@ function createAmpInvadersStage(): StageRuntime {
       enemy.x = targetCenter + (enemy.x - sourceCenter) * applyScale;
       enemy.x = Math.max(pad, Math.min(width - pad, enemy.x));
     });
+  }
+
+  function ensureEnemyFormationFit(width: number): void {
+    const widthChanged = Math.abs(width - lastFormationFitWidth) > 1;
+    if (!needsFormationFit && !widthChanged) {
+      return;
+    }
+    fitEnemyFormationToViewport(width);
+    needsFormationFit = false;
+    lastFormationFitWidth = width;
   }
 
   function stageBottomReached(height: number): boolean {
@@ -2098,7 +2254,9 @@ function createAmpInvadersStage(): StageRuntime {
         // Stage 3 does not use swipe turns; consume queued gestures so stale swipes do not leak across stages.
       }
 
-      fitEnemyFormationToViewport(width);
+      if (!inBoss) {
+        ensureEnemyFormationFit(width);
+      }
 
       const fireInterval = Math.max(95, 185 - wave * 3);
       const auto = stepAutoFire(autoFireCooldownMs, dtMs, fireInterval);
@@ -2394,8 +2552,8 @@ function createAmpInvadersStage(): StageRuntime {
         if (!enemy.alive) return;
         const ex = enemy.x;
         const ey = enemy.y;
-        if (wave === 1 && enemy.wave1Variant) {
-          const sprite = ampWave1EnemyImages[enemy.wave1Variant];
+        if (enemy.spriteVariant) {
+          const sprite = ampEnemyImages[enemy.spriteVariant];
           if (sprite.complete && sprite.naturalWidth > 0 && sprite.naturalHeight > 0) {
             const spriteWidth = enemy.type === "elite" ? 52 : enemy.type === "armored" ? 48 : 44;
             const spriteHeight = enemy.type === "elite" ? 40 : enemy.type === "armored" ? 36 : 34;
@@ -2447,11 +2605,17 @@ function createAmpInvadersStage(): StageRuntime {
 
       if (inBoss) {
         const bossState = bossDirector.getState();
-        context.fillStyle = withAlpha("#1a1a24", 0.94);
-        context.fillRect(bossX - 72, bossY - 24, 144, 48);
-        context.strokeStyle = withAlpha("#ff7ce7", 0.8);
-        context.lineWidth = 2;
-        context.strokeRect(bossX - 72, bossY - 24, 144, 48);
+        const canDrawBossSprite =
+          ampWave4BossImage.complete && ampWave4BossImage.naturalWidth > 0 && ampWave4BossImage.naturalHeight > 0;
+        if (canDrawBossSprite) {
+          context.drawImage(ampWave4BossImage, bossX - 92, bossY - 58, 184, 118);
+        } else {
+          context.fillStyle = withAlpha("#1a1a24", 0.94);
+          context.fillRect(bossX - 72, bossY - 24, 144, 48);
+          context.strokeStyle = withAlpha("#ff7ce7", 0.8);
+          context.lineWidth = 2;
+          context.strokeRect(bossX - 72, bossY - 24, 144, 48);
+        }
         context.fillStyle = withAlpha("#22ddff", 0.78);
         context.fillRect(bossX - 64, bossY - 16, 128 * (bossState.hp / bossState.maxHp), 8);
         context.fillStyle = withAlpha("#f7f7ff", 0.9);
@@ -2466,14 +2630,17 @@ function createAmpInvadersStage(): StageRuntime {
         }
       }
 
-      const canDrawWave1BulletSprite =
-        ampWave1BulletImage.complete && ampWave1BulletImage.naturalWidth > 0 && ampWave1BulletImage.naturalHeight > 0;
+      const bulletSpriteKeys = getBulletSpriteKeysForWaveLocal(wave);
+      const playerBulletSprite = ampBulletImages[bulletSpriteKeys.player];
+      const enemyBulletSprite = ampBulletImages[bulletSpriteKeys.enemy];
       bullets.forEach((bullet) => {
-        if (canDrawWave1BulletSprite) {
-          const spriteHeight = bullet.enemy ? 22 : 26;
-          const spriteWidth = bullet.enemy ? 13 : 16;
+        const sprite = bullet.enemy ? enemyBulletSprite : playerBulletSprite;
+        const canDrawBulletSprite = sprite.complete && sprite.naturalWidth > 0 && sprite.naturalHeight > 0;
+        if (canDrawBulletSprite) {
+          const spriteHeight = bullet.enemy ? 20 : 26;
+          const spriteWidth = bullet.enemy ? 14 : 16;
           context.drawImage(
-            ampWave1BulletImage,
+            sprite,
             bullet.x - spriteWidth / 2,
             bullet.y - spriteHeight / 2,
             spriteWidth,

@@ -1,0 +1,7 @@
+Create ONE game-ready 2D boss sprite for a rock festival arcade shooter.
+Subject: "Main Stage Titan" - massive flying stage-mech with speaker towers as shoulders, spotlight eyes, drum-cannon chest, and wing-like truss scaffolding.
+Style: retro pixel-art, high readability, bold silhouette, chunky pixel clusters, no anti-aliased blur.
+Palette: dark steel, crimson, neon magenta highlights, white spotlights, cyan accent LEDs.
+Mood: final-act concert boss, intimidating and dramatic.
+Background: plain neutral background only, no text, no logos.
+Output: single centered boss sprite only.

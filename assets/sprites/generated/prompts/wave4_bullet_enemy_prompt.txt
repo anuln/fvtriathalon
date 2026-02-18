@@ -1,0 +1,6 @@
+Create ONE game-ready 2D projectile sprite for a rock shooter enemy bullet.
+Subject: "Skull Ember Shot" - hostile red ember projectile with tiny skull-like negative-space notch.
+Style: retro pixel-art, sharp and menacing, no blur.
+Palette: red-orange, dark maroon outline, hot yellow core.
+Background: plain neutral background only.
+Output: one centered projectile sprite.

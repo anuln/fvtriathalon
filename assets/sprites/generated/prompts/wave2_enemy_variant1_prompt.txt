@@ -1,0 +1,7 @@
+Create ONE game-ready 2D sprite for an EDM festival shooter enemy.
+Subject: "Laser Rig Wasp" - angular hovering wasp drone built from truss-light bars, LED stingers, and speaker wings.
+Style: retro pixel-art, hard edges, high contrast silhouette, chunky clusters, no anti-aliased blur.
+Palette: electric cyan, violet-blue, white strobes, tiny magenta accents, dark outlines.
+Mood: high-energy rave, aggressive.
+Background: plain neutral background only, no environment, no text.
+Output: single centered sprite only.

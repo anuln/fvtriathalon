@@ -1,0 +1,7 @@
+Create ONE game-ready 2D sprite for a hip-hop festival shooter enemy.
+Subject: "Tagger Drone" - spray-can jet drone with cap nozzles and graffiti visor.
+Style: retro pixel-art, crisp silhouette, chunky pixels, no painterly style.
+Palette: warm orange, red, black, teal accent glow, bright white dots.
+Mood: fast, disruptive, urban.
+Background: plain neutral background only, no scene.
+Output: single centered sprite.

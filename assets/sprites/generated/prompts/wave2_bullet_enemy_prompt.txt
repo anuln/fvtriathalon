@@ -1,0 +1,6 @@
+Create ONE game-ready 2D projectile sprite for an EDM shooter enemy bullet.
+Subject: "Red Glitch Spike" - hostile jagged spike pulse with red-orange core and noisy edge pixels.
+Style: retro pixel-art, sharp silhouette, no blur.
+Palette: red, orange, dark maroon outline, tiny hot-pink glitch pixels.
+Background: plain neutral background only.
+Output: one centered projectile sprite.

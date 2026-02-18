@@ -1,0 +1,7 @@
+Create ONE game-ready 2D sprite for an EDM festival shooter enemy.
+Subject: "Drop Beacon Orbiter" - a circular drone with segmented LED ring and subwoofer thrusters.
+Style: retro pixel-art, chunky readable silhouette, no soft gradients.
+Palette: cool cyan and aqua dominant, bright white accents, sparse pink sparks, dark stroke.
+Mood: pulsing electronic threat.
+Background: plain neutral background only, no environment, no text.
+Output: single centered sprite only.

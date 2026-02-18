@@ -1,0 +1,6 @@
+Create ONE game-ready 2D projectile sprite for a hip-hop shooter enemy bullet.
+Subject: "Ink Bomb Dart" - dark ink droplet dart with red tip and tiny splatter pixels.
+Style: retro pixel-art, strong silhouette, no anti-aliased blur.
+Palette: near-black, crimson, muted purple edge.
+Background: plain neutral background only.
+Output: one centered projectile sprite.

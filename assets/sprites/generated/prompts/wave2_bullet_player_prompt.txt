@@ -1,0 +1,6 @@
+Create ONE game-ready 2D projectile sprite for an EDM shooter player bullet.
+Subject: "Cyan Beat Lance" - narrow forward bolt with bright cyan core and tiny white strobe tail.
+Style: retro pixel-art, crisp, readable at tiny size, no blur.
+Palette: cyan/white with subtle blue edge.
+Background: plain neutral background only.
+Output: one centered projectile sprite.

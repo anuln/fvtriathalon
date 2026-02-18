@@ -1,0 +1,7 @@
+Create ONE game-ready 2D sprite for a hip-hop festival shooter enemy.
+Subject: "BoomBox Bruiser" - floating boombox mech with heavy bass speaker fists and chain details.
+Style: retro pixel-art, bold chunky form, strong silhouette, no anti-aliased blur.
+Palette: gold, charcoal, deep cyan accents, white sparkle highlights.
+Mood: street-stage swagger, threatening.
+Background: plain neutral background only, no text.
+Output: single centered sprite.

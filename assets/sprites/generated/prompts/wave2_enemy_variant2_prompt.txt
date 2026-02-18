@@ -1,0 +1,7 @@
+Create ONE game-ready 2D sprite for an EDM festival shooter enemy.
+Subject: "Neon Prism Crusher" - a crystalline prism bot with rotating light panels and bass-reactive core.
+Style: retro pixel-art, crisp silhouette at small scale, no painterly effects.
+Palette: cyan, teal, ultraviolet blue, white highlights, black outline.
+Mood: synthetic, sharp, intimidating.
+Background: plain neutral background only, no scene, no text.
+Output: one centered sprite.

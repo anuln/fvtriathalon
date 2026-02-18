@@ -1,0 +1,6 @@
+Create ONE game-ready 2D projectile sprite for a hip-hop shooter player bullet.
+Subject: "Gold Snap Shot" - compact forward shot like a glowing gold pick with short cyan trail.
+Style: retro pixel-art, clean silhouette, no blur.
+Palette: gold core, cyan trail, dark outline.
+Background: plain neutral background only.
+Output: one centered projectile sprite.
