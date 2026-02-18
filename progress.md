@@ -199,3 +199,11 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
   - `npm run build`: pass
   - `npm run test:e2e -- e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts`: pass
   - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (10 passed)
+
+- Pac-Man parity follow-up for overlay/swipe issue:
+  - Extended `e2e/mobile-hit-target.spec.ts` with a stage-2 test:
+    - `mobile gameplay hit target resolves to canvas in mosh pit pac-man`.
+  - This confirms touches are not intercepted by overlay in Pac-Man stage either.
+- Verification (fresh):
+  - `npm run test:e2e -- e2e/mobile-hit-target.spec.ts`: pass (2 passed)
+  - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts`: pass (9 passed)
