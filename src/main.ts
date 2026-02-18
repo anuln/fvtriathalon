@@ -126,7 +126,6 @@ app.innerHTML = `
     <header class="hud">
       <div class="hud-item" id="hud-time">09:00</div>
       <div class="hud-item hud-stage" id="hud-stage">Stage 1/3</div>
-      <div class="hud-item" id="hud-bank">Triathlon Points: 0</div>
     </header>
     <section class="canvas-wrap">
       <canvas id="game-canvas"></canvas>
@@ -135,8 +134,7 @@ app.innerHTML = `
     </section>
     <footer class="action-rail">
       <div class="stage-meta">
-        <span id="hud-score">Score: 0</span>
-        <span id="hud-hint"></span>
+        <span id="hud-score">Stage: 0 • Total: 0</span>
       </div>
       <button id="commit-btn" class="btn primary hidden">Finish Stage</button>
     </footer>
@@ -148,9 +146,7 @@ const overlay = must(document.querySelector<HTMLDivElement>("#overlay"), "Missin
 const adminPanel = must(document.querySelector<HTMLDivElement>("#admin-panel"), "Missing admin panel");
 const hudTime = must(document.querySelector<HTMLDivElement>("#hud-time"), "Missing hud time");
 const hudStage = must(document.querySelector<HTMLDivElement>("#hud-stage"), "Missing hud stage");
-const hudBank = must(document.querySelector<HTMLDivElement>("#hud-bank"), "Missing hud bank");
 const hudScore = must(document.querySelector<HTMLSpanElement>("#hud-score"), "Missing hud score");
-const hudHint = must(document.querySelector<HTMLSpanElement>("#hud-hint"), "Missing hud hint");
 const commitBtn = must(document.querySelector<HTMLButtonElement>("#commit-btn"), "Missing commit button");
 
 const ctx = must(canvas.getContext("2d"), "2D canvas context unavailable");
@@ -411,16 +407,17 @@ function render(): void {
 
 function syncHud(): void {
   const leftMs = Math.max(0, RUN_TOTAL_MS - globalElapsedMs);
-  const stageTri = currentStageTriPreview();
-  const projectedTri = projectedTriTotal();
-  const showProjected = mode === "playing" || mode === "deathPause" || mode === "deathChoice" || mode === "transition";
+  const compactHud = frameWidth <= 520;
   hudTime.textContent = formatMs(leftMs);
-  hudStage.textContent = mode === "results" || mode === "leaderboard" ? "Run Complete" : `Stage ${flow.currentStageIndex + 1}/3`;
-  hudBank.textContent = showProjected
-    ? `Triathlon Points: ${totalBankedTri()} • Live ${projectedTri}`
-    : `Triathlon Points: ${totalBankedTri()}`;
-  hudScore.textContent = `Stage Raw: ${Math.round(flow.stageRaw)} • Stage Tri: ${stageTri}`;
-  hudHint.textContent = stage.getHudHint();
+  hudStage.textContent =
+    mode === "results" || mode === "leaderboard"
+      ? compactHud
+        ? "Complete"
+        : "Run Complete"
+      : compactHud
+      ? `S${flow.currentStageIndex + 1}/3`
+      : `Stage ${flow.currentStageIndex + 1}/3`;
+  hudScore.textContent = `Stage: ${Math.round(flow.stageRaw)} • Total: ${totalBankedTri()}`;
 }
 
 function syncCommitButton(): void {
@@ -3036,7 +3033,7 @@ function injectStyles(): void {
     }
     .hud {
       display: grid;
-      grid-template-columns: 1fr auto 1fr;
+      grid-template-columns: 1fr auto;
       align-items: center;
       gap: 8px;
       padding: 6px 10px;
@@ -3050,11 +3047,12 @@ function injectStyles(): void {
       font-weight: 700;
       letter-spacing: 0.04em;
       text-shadow: 0 0 10px rgba(255, 96, 214, 0.35);
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .hud-stage {
-      justify-self: center;
-    }
-    #hud-bank {
       justify-self: end;
     }
     .canvas-wrap {
@@ -3160,8 +3158,15 @@ function injectStyles(): void {
     .stage-meta {
       display: grid;
       gap: 3px;
-      font-size: 13px;
+      font-size: 11px;
       text-shadow: 0 0 10px rgba(0, 230, 255, 0.22);
+      min-width: 0;
+      flex: 1;
+    }
+    #hud-score {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .muted {
       opacity: 0.72;
@@ -3251,20 +3256,22 @@ function injectStyles(): void {
       max-height: 220px;
       overflow: auto;
     }
-    @media (max-width: 389px) {
+    @media (max-width: 520px) {
       :root {
         --gutter: 6px;
-        --hud-h: 44px;
+        --hud-h: 42px;
         --rail-h: 48px;
       }
       .hud {
-        gap: 6px;
+        gap: 4px;
+        padding: 4px 8px;
       }
       .hud-item {
-        font-size: 13px;
+        font-size: 12px;
+        letter-spacing: 0.02em;
       }
       .stage-meta {
-        font-size: 12px;
+        font-size: 10px;
       }
       .btn {
         min-width: 114px;
@@ -3273,6 +3280,14 @@ function injectStyles(): void {
       .card {
         width: min(95vw, 520px);
         padding: 14px;
+      }
+    }
+    @media (max-width: 389px) {
+      .hud-item {
+        font-size: 11px;
+      }
+      .stage-meta {
+        font-size: 9px;
       }
     }
   `;
