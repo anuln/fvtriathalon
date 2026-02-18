@@ -305,3 +305,35 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
   - `npm run lint`: pass
   - `npm run build`: pass
   - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts e2e/stage-flow.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (17 passed)
+
+- Stage 3 v2 (wave + spread core systems) implementation pass:
+  - Added new deterministic Stage 3 config and progression modules:
+    - `src/games/amp-invaders/stage3v2Config.ts`
+    - `src/games/amp-invaders/waveDirectorV2.ts`
+    - `src/games/amp-invaders/spreadLadder.ts`
+  - Added TDD coverage first:
+    - `tests/games/amp-invaders/stage3v2Config.test.ts`
+    - `tests/games/amp-invaders/waveDirectorV2.test.ts`
+    - `tests/games/amp-invaders/spreadLadder.test.ts`
+  - Updated Stage 3 runtime wiring in `src/main.ts`:
+    - genre path now `pop -> edm -> hiphop -> rock`
+    - wave-clear upgrades now increase spread tier up to Tier 4 (`single/dual/triple/wide`)
+    - debug state now exposes `spreadTier` and `nextUpgradeWave`
+    - player volleys now use spread-tier projectile patterns via `buildPlayerVolley(...)`
+    - wave composition now driven by config wave patterns (`rows/cols/type mix/speed/fire cadence`)
+  - Added E2E regression for Stage 3 v2 state surface:
+    - `e2e/amp-autofire.spec.ts` test: `amp invaders exposes stage3 v2 progression state`
+  - Verification (fresh):
+    - `npm run test -- tests/games/amp-invaders/stage3v2Config.test.ts tests/games/amp-invaders/waveDirectorV2.test.ts tests/games/amp-invaders/spreadLadder.test.ts`: pass
+    - `npm run test:e2e -- e2e/amp-autofire.spec.ts`: pass (5 passed)
+
+- Stage 3 v2 progression verification hardening:
+  - Added E2E regression `amp invaders upgrades spread tier after a wave clear` in `e2e/amp-autofire.spec.ts`.
+  - Added test-only hook `advanceAmpWaveForTest` in `src/main.ts`:
+    - extends StageRuntime with optional `forceWaveClearForTest`.
+    - Amp stage implementation force-clears alive enemies so next tick advances wave/tier deterministically.
+  - Verification (fresh, full gate):
+    - `npm run lint`: pass
+    - `npm run build`: pass
+    - `npm run test`: pass (24 files / 46 tests)
+    - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts e2e/stage-flow.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (19 passed)

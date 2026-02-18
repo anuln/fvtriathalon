@@ -23,6 +23,60 @@ test("amp invaders uses continuous auto-fire", async ({ page }) => {
   expect(state.stageState?.totalShotsFired ?? 0).toBeGreaterThan(0);
 });
 
+test("amp invaders exposes stage3 v2 progression state", async ({ page }) => {
+  await page.goto("http://127.0.0.1:4173/");
+  await page.getByTestId("start").click();
+
+  await page.evaluate(() => {
+    const advance = (window as Window & { advanceTriathlonForTest?: () => void }).advanceTriathlonForTest;
+    advance?.();
+    advance?.();
+  });
+
+  const state = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    return JSON.parse(json) as {
+      stageName?: string;
+      stageState?: { wave?: number; genre?: string; spreadTier?: number; nextUpgradeWave?: number | null };
+    };
+  });
+
+  expect(state.stageName).toBe("Amp Invaders");
+  expect(state.stageState?.wave).toBe(1);
+  expect(state.stageState?.genre).toBe("pop");
+  expect(state.stageState?.spreadTier).toBe(1);
+  expect(state.stageState?.nextUpgradeWave).toBe(2);
+});
+
+test("amp invaders upgrades spread tier after a wave clear", async ({ page }) => {
+  await page.goto("http://127.0.0.1:4173/");
+  await page.getByTestId("start").click();
+
+  await page.evaluate(() => {
+    const advance = (window as Window & { advanceTriathlonForTest?: () => void }).advanceTriathlonForTest;
+    advance?.();
+    advance?.();
+  });
+
+  await page.evaluate(() => {
+    (window as Window & { advanceAmpWaveForTest?: () => void }).advanceAmpWaveForTest?.();
+  });
+
+  const state = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    return JSON.parse(json) as {
+      stageName?: string;
+      stageState?: { wave?: number; genre?: string; spreadTier?: number; nextUpgradeWave?: number | null };
+    };
+  });
+
+  expect(state.stageName).toBe("Amp Invaders");
+  expect(state.stageState?.wave).toBe(2);
+  expect(state.stageState?.genre).toBe("edm");
+  expect(state.stageState?.spreadTier).toBe(2);
+  expect(state.stageState?.nextUpgradeWave).toBe(3);
+});
+
 test("amp invaders does not collapse enemy block into instant stage loss on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("http://127.0.0.1:4173/");

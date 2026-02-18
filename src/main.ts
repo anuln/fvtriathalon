@@ -26,6 +26,14 @@ import { getDefaultTheme, listThemes } from "./theme/themeRegistry";
 import type { ThemePack } from "./theme/themeTypes";
 import { stepAutoFire } from "./games/amp-invaders/autoFire";
 import { resolveEnemyBulletHit } from "./games/amp-invaders/collision";
+import { buildPlayerVolley } from "./games/amp-invaders/spreadLadder";
+import {
+  STAGE3_V2_DEFAULT_CONFIG,
+  type GenreId,
+  type SpreadTier,
+  getWaveSpec
+} from "./games/amp-invaders/stage3v2Config";
+import { createWaveDirectorV2 } from "./games/amp-invaders/waveDirectorV2";
 import { createZoneMusicState, updateZoneMusicState } from "./games/moshpit-pacman/zoneMusicState";
 
 type StageId = "rhythm-serpent" | "moshpit-pacman" | "amp-invaders";
@@ -66,6 +74,7 @@ type StageRuntime = {
   isDead: () => boolean;
   getHudHint: () => string;
   debugState: () => unknown;
+  forceWaveClearForTest?: () => void;
 };
 
 const STAGE_IDS: StageId[] = ["rhythm-serpent", "moshpit-pacman", "amp-invaders"];
@@ -1622,13 +1631,17 @@ function createMoshPitPacmanStage(): StageRuntime {
 
 function createAmpInvadersStage(): StageRuntime {
   type Enemy = { x: number; y: number; type: "basic" | "armored" | "elite"; hp: number; alive: boolean };
-  type Bullet = { x: number; y: number; vy: number; damage: number; enemy: boolean };
+  type Bullet = { x: number; y: number; vx: number; vy: number; damage: number; enemy: boolean };
 
   let score = 0;
   let dead = false;
-  let wave = 1;
+  const waveDirector = createWaveDirectorV2(STAGE3_V2_DEFAULT_CONFIG);
+  let waveState = waveDirector.getState();
+  let wave = waveState.wave;
   let lives = 3;
-  let genre: "jazz" | "rock" | "edm" | "metal" = "jazz";
+  let genre: GenreId = waveState.genre;
+  let spreadTier: SpreadTier = waveState.spreadTier;
+  let nextUpgradeWave: number | null = waveState.nextUpgradeWave;
   let playerX = 0.5;
   let playerVelX = 0;
   let steerTargetX: number | null = null;
@@ -1639,6 +1652,7 @@ function createAmpInvadersStage(): StageRuntime {
   let chargeMs = 0;
   let wasHoldingAction = false;
   let enemyFireCooldownMs = 900;
+  let enemyFireCadenceScale = 1;
   let discoTimerMs = 8000;
   let disco: { active: boolean; x: number; y: number; vx: number } = { active: false, x: 0, y: 48, vx: 220 };
   const bullets: Bullet[] = [];
@@ -1649,14 +1663,15 @@ function createAmpInvadersStage(): StageRuntime {
   let totalShotsFired = 0;
 
   function spawnWave(level: number): Enemy[] {
+    const waveSpec = getWaveSpec(STAGE3_V2_DEFAULT_CONFIG, level);
     const list: Enemy[] = [];
-    const rows = 5;
-    const cols = 9;
+    const rows = waveSpec.rows;
+    const cols = waveSpec.cols;
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        const type = r === 0 ? "elite" : r < 3 ? "armored" : "basic";
+        const type = r < waveSpec.eliteRows ? "elite" : r < waveSpec.eliteRows + waveSpec.armoredRows ? "armored" : "basic";
         list.push({
-          x: 120 + c * 72,
+          x: 120 + c * 68,
           y: 80 + r * 52,
           type,
           hp: type === "elite" ? 3 : type === "armored" ? 2 : 1,
@@ -1664,7 +1679,8 @@ function createAmpInvadersStage(): StageRuntime {
         });
       }
     }
-    enemySpeed = 40 + level * 8;
+    enemySpeed = (40 + level * 8) * waveSpec.speedScale;
+    enemyFireCadenceScale = waveSpec.fireCadenceScale;
     return list;
   }
 
@@ -1701,13 +1717,6 @@ function createAmpInvadersStage(): StageRuntime {
 
   function stageBottomReached(height: number): boolean {
     return aliveEnemies().some((enemy) => enemy.y > height - 120);
-  }
-
-  function nextGenre(current: typeof genre): typeof genre {
-    if (current === "jazz") return "rock";
-    if (current === "rock") return "edm";
-    if (current === "edm") return "metal";
-    return "jazz";
   }
 
   return {
@@ -1759,14 +1768,9 @@ function createAmpInvadersStage(): StageRuntime {
       const auto = stepAutoFire(autoFireCooldownMs, dtMs, fireInterval);
       autoFireCooldownMs = auto.cooldownMs;
       for (let i = 0; i < auto.shots; i += 1) {
-        bullets.push({
-          x: playerX * width + (i % 2 === 0 ? -3 : 3),
-          y: height - 72,
-          vy: -620,
-          damage: 1,
-          enemy: false
-        });
-        totalShotsFired += 1;
+        const volley = buildPlayerVolley(spreadTier, playerX * width, height - 72);
+        bullets.push(...volley);
+        totalShotsFired += volley.length;
       }
 
       if (input.actionHeld) {
@@ -1776,6 +1780,7 @@ function createAmpInvadersStage(): StageRuntime {
         bullets.push({
           x: playerX * width,
           y: height - 74,
+          vx: 0,
           vy: -760,
           damage: chargeMs >= 900 ? 4 : 3,
           enemy: false
@@ -1811,9 +1816,9 @@ function createAmpInvadersStage(): StageRuntime {
         const shooters = aliveEnemies();
         if (shooters.length > 0) {
           const shooter = shooters[Math.floor(Math.random() * shooters.length)];
-          bullets.push({ x: shooter.x, y: shooter.y + 12, vy: 280 + wave * 12, damage: 1, enemy: true });
+          bullets.push({ x: shooter.x, y: shooter.y + 12, vx: 0, vy: 280 + wave * 12, damage: 1, enemy: true });
         }
-        enemyFireCooldownMs = Math.max(350, 900 - wave * 30);
+        enemyFireCooldownMs = Math.max(320, (900 - wave * 30) * enemyFireCadenceScale);
       }
 
       if (discoTimerMs <= 0 && !disco.active) {
@@ -1832,6 +1837,7 @@ function createAmpInvadersStage(): StageRuntime {
       }
 
       for (const bullet of bullets) {
+        bullet.x += bullet.vx * (dtMs / 1000);
         bullet.y += bullet.vy * (dtMs / 1000);
       }
 
@@ -1889,8 +1895,11 @@ function createAmpInvadersStage(): StageRuntime {
       }
 
       if (aliveEnemies().length === 0) {
-        wave += 1;
-        genre = nextGenre(genre);
+        waveState = waveDirector.advanceOnWaveClear();
+        wave = waveState.wave;
+        genre = waveState.genre;
+        spreadTier = waveState.spreadTier;
+        nextUpgradeWave = waveState.nextUpgradeWave;
         score += 120;
         enemies = spawnWave(wave);
         enemyDir = 1;
@@ -1902,10 +1911,10 @@ function createAmpInvadersStage(): StageRuntime {
     },
     draw(context, width, height, theme, pulse) {
       const stagePalettes: Record<typeof genre, { top: string; bottom: string; line: string }> = {
-        jazz: { top: "#13082a", bottom: "#080013", line: "#6f58ff" },
-        rock: { top: "#1f0414", bottom: "#080010", line: "#ff3a7a" },
+        pop: { top: "#2c0834", bottom: "#130017", line: "#ff7ce7" },
         edm: { top: "#07182f", bottom: "#020710", line: "#29d8ff" },
-        metal: { top: "#150208", bottom: "#020202", line: "#ff6629" }
+        hiphop: { top: "#17120a", bottom: "#080602", line: "#f7b733" },
+        rock: { top: "#1f0414", bottom: "#080010", line: "#ff3a7a" },
       };
       const palette = stagePalettes[genre];
       const gradient = context.createLinearGradient(0, 0, 0, height);
@@ -2015,13 +2024,16 @@ function createAmpInvadersStage(): StageRuntime {
       return dead;
     },
     getHudHint() {
-      return `Wave ${wave} • ${genre.toUpperCase()} • Lives ${lives} • AUTO-FIRE`;
+      const tierLabel = spreadTier === 1 ? "SINGLE" : spreadTier === 2 ? "DUAL" : spreadTier === 3 ? "TRIPLE" : "WIDE";
+      return `Wave ${wave} • ${genre.toUpperCase()} • ${tierLabel} • Lives ${lives} • AUTO-FIRE`;
     },
     debugState() {
       const alive = aliveEnemies();
       return {
         wave,
         genre,
+        spreadTier,
+        nextUpgradeWave,
         lives,
         playerX,
         controlTelemetry: {
@@ -2035,6 +2047,11 @@ function createAmpInvadersStage(): StageRuntime {
         aliveEnemies: alive.length,
         totalShotsFired
       };
+    },
+    forceWaveClearForTest() {
+      enemies.forEach((enemy) => {
+        enemy.alive = false;
+      });
     }
   };
 }
@@ -3367,17 +3384,28 @@ function advanceTriathlonForTest(): void {
   }
 }
 
+function advanceAmpWaveForTest(): void {
+  if (mode !== "playing" || stage.id !== "amp-invaders") {
+    return;
+  }
+  stage.forceWaveClearForTest?.();
+  tick(0);
+  render();
+}
+
 declare global {
   interface Window {
     render_game_to_text?: () => string;
     advanceTime?: (ms: number) => void;
     advanceTriathlonForTest?: () => void;
+    advanceAmpWaveForTest?: () => void;
   }
 }
 
 window.render_game_to_text = renderGameToText;
 window.advanceTime = advanceTime;
 window.advanceTriathlonForTest = advanceTriathlonForTest;
+window.advanceAmpWaveForTest = advanceAmpWaveForTest;
 
 // Keep the triathlon rules module hot in runtime for consistency checks.
 computeStageOptions({ elapsedMs: 0, stageEnded: false });
