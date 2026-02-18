@@ -39,6 +39,7 @@ import { createWaveDirectorV2 } from "./games/amp-invaders/waveDirectorV2";
 import { createEnemyDirector } from "./games/amp-invaders/enemyDirector";
 import { createBossDirector } from "./games/amp-invaders/bossDirector";
 import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specials";
+import { pickWave1EnemyVariant, type Wave1EnemyVariant } from "./games/amp-invaders/wave1SpriteRoster";
 import { createZoneMusicState, updateZoneMusicState } from "./games/moshpit-pacman/zoneMusicState";
 import {
   applyGuitarSoloScoreMultiplier,
@@ -50,6 +51,14 @@ import {
   RHYTHM_SERPENT_POWER_KINDS,
   type RhythmSerpentPowerKind
 } from "./games/rhythm-serpent/guitarSoloPowerup";
+import {
+  bootCopy,
+  deathChoiceCopy,
+  deathPauseCopy,
+  leaderboardCopy,
+  resultsCopy,
+  transitionCopy
+} from "./ui/festivalUxCopy";
 
 type StageId = "rhythm-serpent" | "moshpit-pacman" | "amp-invaders";
 type Dir = "up" | "down" | "left" | "right";
@@ -96,6 +105,7 @@ type StageRuntime = {
 
 const STAGE_IDS: StageId[] = ["rhythm-serpent", "moshpit-pacman", "amp-invaders"];
 const STAGE_NAMES = ["Rhythm Serpent", "Mosh Pit Pac-Man", "Amp Invaders"];
+const STAGE_SHORT_NAMES = ["RS", "MP", "AI"];
 const RUN_TOTAL_MS = resolveRunTotalMs(window.location.search);
 const THEME_OVERRIDE_KEY = "festiverse.theme.override";
 const THEME_CYCLE_KEY = "festiverse.theme.cycle";
@@ -103,6 +113,11 @@ const THEME_CYCLE_INDEX_KEY = "festiverse.theme.cycle.index";
 const FORCE_GUITAR_SOLO_POWER = new URLSearchParams(window.location.search).get("forceGuitarSoloPower") === "1";
 const GUITAR_SOLO_SFX_URL = new URL("../assets/audio/lyria2/oneshot_guitar_solo.wav", import.meta.url).href;
 const GUITAR_SOLO_SPRITE_URL = new URL("../assets/sprites/rhythm-serpent-guitar-solo.png", import.meta.url).href;
+const AMP_WAVE1_ENEMY_BASELINE_URL = new URL("../assets/sprites/generated/wave1_enemy_test.png", import.meta.url).href;
+const AMP_WAVE1_ENEMY_VARIANT2_URL = new URL("../assets/sprites/generated/wave1_enemy_variant2_test.png", import.meta.url).href;
+const AMP_WAVE1_ENEMY_VARIANT3_URL = new URL("../assets/sprites/generated/wave1_enemy_variant3_test.png", import.meta.url).href;
+const AMP_WAVE1_ENEMY_VARIANT4_URL = new URL("../assets/sprites/generated/wave1_enemy_variant4_test.png", import.meta.url).href;
+const AMP_WAVE1_BULLET_URL = new URL("../assets/sprites/generated/wave1_bullet_test.png", import.meta.url).href;
 
 function must<T>(value: T | null | undefined, message: string): T {
   if (value === null || value === undefined) {
@@ -139,7 +154,7 @@ app.innerHTML = `
       <div class="stage-meta">
         <span id="hud-score">Stage: 0 • Total: 0</span>
       </div>
-      <button id="commit-btn" class="btn primary hidden">Finish Stage</button>
+      <button id="commit-btn" class="btn primary hidden">LOCK STAGE</button>
     </footer>
   </div>
 `;
@@ -182,6 +197,13 @@ let secretHoldTimer = 0;
 let isPointerHeldOnOverlay = false;
 let cycleThemesOnRestart = readBool(THEME_CYCLE_KEY);
 const guitarSoloSpriteImage = createOptionalImage(GUITAR_SOLO_SPRITE_URL);
+const ampWave1EnemyImages: Record<Wave1EnemyVariant, HTMLImageElement> = {
+  baseline: createOptionalImage(AMP_WAVE1_ENEMY_BASELINE_URL),
+  variant2: createOptionalImage(AMP_WAVE1_ENEMY_VARIANT2_URL),
+  variant3: createOptionalImage(AMP_WAVE1_ENEMY_VARIANT3_URL),
+  variant4: createOptionalImage(AMP_WAVE1_ENEMY_VARIANT4_URL)
+};
+const ampWave1BulletImage = createOptionalImage(AMP_WAVE1_BULLET_URL);
 
 const input = createInputController(canvas);
 input.setStage(STAGE_IDS[flow.currentStageIndex] ?? "rhythm-serpent");
@@ -410,6 +432,7 @@ function render(): void {
 function syncHud(): void {
   const leftMs = Math.max(0, RUN_TOTAL_MS - globalElapsedMs);
   const compactHud = frameWidth <= 520;
+  const summary = finalScoreSummary();
   hudTime.textContent = formatMs(leftMs);
   hudStage.textContent =
     mode === "results" || mode === "leaderboard"
@@ -419,7 +442,10 @@ function syncHud(): void {
       : compactHud
       ? `S${flow.currentStageIndex + 1}/3`
       : `Stage ${flow.currentStageIndex + 1}/3`;
-  hudScore.textContent = `Stage: ${Math.round(flow.stageRaw)} • Total: ${totalBankedScore()}`;
+  hudScore.textContent =
+    mode === "results" || mode === "leaderboard"
+      ? `Set Total: ${summary.baseScore} • Final: ${summary.totalScore}`
+      : `Stage: ${Math.round(flow.stageRaw)} • Total: ${totalBankedScore()}`;
 }
 
 function syncCommitButton(): void {
@@ -433,34 +459,34 @@ function syncOverlay(): void {
   if (mode === "boot") {
     markup = `
       <div class="card attract" data-secret-hold="true">
-        <p class="eyebrow">NEON TOURNAMENT BROADCAST</p>
-        <h1 class="title-stack"><span>FESTIVERSE</span><span>ARCADE TRIATHLON</span></h1>
-        <p class="strap">3 games. One clock. One total score.</p>
-        <p class="muted">Tap to enable audio and begin the set.</p>
-        <button class="btn primary" data-testid="start" data-action="start-run">START</button>
+        <p class="eyebrow">${bootCopy.eyebrow}</p>
+        <h1 class="title-stack"><span>${bootCopy.titleTop}</span><span>${bootCopy.titleBottom}</span></h1>
+        <p class="strap">${bootCopy.strap}</p>
+        <p class="muted">${bootCopy.hint}</p>
+        <button class="btn primary" data-testid="start" data-action="start-run">${bootCopy.startCta}</button>
         <div class="stage-pill-row">
-          <span>RHYTHM SERPENT</span>
-          <span>MOSH PIT PAC-MAN</span>
-          <span>AMP INVADERS</span>
+          <span>${bootCopy.stageLabels[0]}</span>
+          <span>${bootCopy.stageLabels[1]}</span>
+          <span>${bootCopy.stageLabels[2]}</span>
         </div>
-        <small>Move forward after 60s. No backtracking once committed.</small>
+        <small>${bootCopy.rules}</small>
       </div>
     `;
   } else if (mode === "deathPause") {
     markup = `
       <div class="card compact">
-        <h2>Stage Impact</h2>
-        <p>Hold for the drop...</p>
+        <h2>${deathPauseCopy.title}</h2>
+        <p>${deathPauseCopy.subtitle}</p>
       </div>
     `;
   } else if (mode === "deathChoice") {
     markup = `
       <div class="card">
-        <h2>Stage Ended</h2>
-        <p>Retry here or bank this stage score and continue.</p>
+        <h2>${deathChoiceCopy.title}</h2>
+        <p>${deathChoiceCopy.subtitle}</p>
         <div class="row">
-          <button class="btn primary" data-action="retry">RETRY HERE</button>
-          <button class="btn secondary" data-action="open-commit">BANK SCORE & CONTINUE</button>
+          <button class="btn primary" data-action="retry">${deathChoiceCopy.primaryCta}</button>
+          <button class="btn secondary" data-action="open-commit">${deathChoiceCopy.secondaryCta}</button>
         </div>
       </div>
     `;
@@ -468,42 +494,65 @@ function syncOverlay(): void {
     const nextLabel = flow.currentStageIndex >= STAGE_NAMES.length ? "Results" : STAGE_NAMES[flow.currentStageIndex];
     markup = `
       <div class="card">
-        <h2>Stage ${transitionCommittedStageIndex + 1} Complete</h2>
-        <p>Stage Score: ${Math.round(transitionStageRawScore)}</p>
-        <p>Total Score: ${transitionTotalScore}</p>
-        <p class="muted">Next: ${nextLabel}</p>
+        <h2>STAGE ${transitionCommittedStageIndex + 1} LOCKED</h2>
+        <p>Banked: ${Math.round(transitionStageRawScore)}</p>
+        <p>Set Total: ${transitionTotalScore}</p>
+        <p class="muted">${transitionCopy.nextPrefix}: ${nextLabel}</p>
         <div class="row">
-          <button class="btn primary" data-action="continue-stage">CONTINUE</button>
+          <button class="btn primary" data-action="continue-stage">${transitionCopy.cta}</button>
         </div>
       </div>
     `;
   } else if (mode === "results") {
     const summary = finalScoreSummary();
-    const splits = flow.bankedTri.map((value, idx) => `<li>${STAGE_NAMES[idx]}: ${value}</li>`).join("");
+    const splits = flow.bankedTri
+      .map(
+        (value, idx) =>
+          `<li><span>${STAGE_NAMES[idx]}</span><strong>${value}</strong></li>`
+      )
+      .join("");
     markup = `
       <div class="card results">
-        <h2>FINAL SCORE</h2>
+        <h2>${resultsCopy.title}</h2>
         <p class="score">${summary.totalScore}</p>
-        <p>Base Score: ${summary.baseScore}</p>
-        <p>Time Bonus: +${summary.timeBonus}</p>
-        <ul>${splits}</ul>
+        <div class="score-grid">
+          <p><span>${resultsCopy.stageTotalLabel}</span><strong>${summary.baseScore}</strong></p>
+          <p><span>${resultsCopy.timeBonusLabel}</span><strong>+${summary.timeBonus}</strong></p>
+          <p><span>${resultsCopy.finalLabel}</span><strong>${summary.totalScore}</strong></p>
+        </div>
+        <ul class="split-list">${splits}</ul>
         <div class="row">
-          <button class="btn primary" data-action="submit-score">${submittedScore ? "SUBMITTED" : "SUBMIT TO LEADERBOARD"}</button>
-          <button class="btn secondary" data-action="open-leaderboard">LEADERBOARD</button>
-          <button class="btn secondary" data-action="play-again">PLAY AGAIN</button>
+          <button class="btn primary" data-action="submit-score">${submittedScore ? resultsCopy.submittedCta : resultsCopy.submitCta}</button>
+          <button class="btn secondary" data-action="open-leaderboard">${resultsCopy.leaderboardCta}</button>
+          <button class="btn secondary" data-action="play-again">${resultsCopy.playAgainCta}</button>
         </div>
       </div>
     `;
   } else if (mode === "leaderboard") {
     const rows = topScores()
-      .map((entry, index) => `<li>#${index + 1} ${entry.player} · ${entry.total} · ${entry.splits.join("/")}</li>`)
+      .map((entry, index) => {
+        const splitA = Math.round(entry.splits[0] ?? 0);
+        const splitB = Math.round(entry.splits[1] ?? 0);
+        const splitC = Math.round(entry.splits[2] ?? 0);
+        return `
+          <li class="leaderboard-row ${entry.player === "YOU" ? "is-you" : ""}">
+            <div class="leaderboard-head">
+              <span>#${index + 1}</span>
+              <strong>${entry.player}</strong>
+              <strong>${entry.total}</strong>
+            </div>
+            <small>${STAGE_SHORT_NAMES[0]} ${splitA} · ${STAGE_SHORT_NAMES[1]} ${splitB} · ${STAGE_SHORT_NAMES[2]} ${splitC}</small>
+          </li>
+        `;
+      })
       .join("");
     markup = `
       <div class="card results">
-        <h2>LEADERBOARD</h2>
-        <ol>${rows || "<li>No scores yet.</li>"}</ol>
+        <h2>${leaderboardCopy.title}</h2>
+        ${submittedScore ? "" : `<p class="muted">${leaderboardCopy.pendingSubmitHint}</p>`}
+        <ol class="leaderboard-list">${rows || `<li>${leaderboardCopy.empty}</li>`}</ol>
         <div class="row">
-          <button class="btn secondary" data-action="back-to-results">BACK</button>
+          <button class="btn secondary" data-action="back-to-results">${leaderboardCopy.backCta}</button>
         </div>
       </div>
     `;
@@ -1832,7 +1881,14 @@ function createMoshPitPacmanStage(): StageRuntime {
 }
 
 function createAmpInvadersStage(): StageRuntime {
-  type Enemy = { x: number; y: number; type: "basic" | "armored" | "elite"; hp: number; alive: boolean };
+  type Enemy = {
+    x: number;
+    y: number;
+    type: "basic" | "armored" | "elite";
+    hp: number;
+    alive: boolean;
+    wave1Variant: Wave1EnemyVariant | null;
+  };
   type Bullet = { x: number; y: number; vx: number; vy: number; damage: number; enemy: boolean };
 
   let score = 0;
@@ -1889,12 +1945,14 @@ function createAmpInvadersStage(): StageRuntime {
       for (let c = 0; c < cols; c += 1) {
         const type = r < waveSpec.eliteRows ? "elite" : r < waveSpec.eliteRows + waveSpec.armoredRows ? "armored" : "basic";
         const baseHp = type === "elite" ? 3 : type === "armored" ? 2 : 1;
+        const slotIndex = r * cols + c;
         list.push({
           x: 120 + c * 68,
           y: 80 + r * 52,
           type,
           hp: Math.max(1, Math.round((baseHp + hpBoost) * Math.max(1, aggression.bulletSpeedScale * 0.92))),
-          alive: true
+          alive: true,
+          wave1Variant: level === 1 ? pickWave1EnemyVariant(slotIndex) : null
         });
       }
     }
@@ -2336,6 +2394,15 @@ function createAmpInvadersStage(): StageRuntime {
         if (!enemy.alive) return;
         const ex = enemy.x;
         const ey = enemy.y;
+        if (wave === 1 && enemy.wave1Variant) {
+          const sprite = ampWave1EnemyImages[enemy.wave1Variant];
+          if (sprite.complete && sprite.naturalWidth > 0 && sprite.naturalHeight > 0) {
+            const spriteWidth = enemy.type === "elite" ? 52 : enemy.type === "armored" ? 48 : 44;
+            const spriteHeight = enemy.type === "elite" ? 40 : enemy.type === "armored" ? 36 : 34;
+            context.drawImage(sprite, ex - spriteWidth / 2, ey - spriteHeight / 2, spriteWidth, spriteHeight);
+            return;
+          }
+        }
         if (enemy.type === "elite") {
           context.fillStyle = "#ffd447";
           context.fillRect(ex - 20, ey - 12, 40, 24);
@@ -2399,7 +2466,22 @@ function createAmpInvadersStage(): StageRuntime {
         }
       }
 
+      const canDrawWave1BulletSprite =
+        wave === 1 && ampWave1BulletImage.complete && ampWave1BulletImage.naturalWidth > 0 && ampWave1BulletImage.naturalHeight > 0;
       bullets.forEach((bullet) => {
+        if (canDrawWave1BulletSprite) {
+          const spriteHeight = bullet.enemy ? 18 : 20;
+          const spriteWidth = bullet.enemy ? 11 : 12;
+          context.drawImage(
+            ampWave1BulletImage,
+            bullet.x - spriteWidth / 2,
+            bullet.y - spriteHeight / 2,
+            spriteWidth,
+            spriteHeight
+          );
+          return;
+        }
+
         context.fillStyle = bullet.enemy ? "#ff5a36" : "#ccfff2";
         context.fillRect(bullet.x - 2, bullet.y - 9, 4, 18);
         if (!bullet.enemy) {
@@ -2792,6 +2874,9 @@ function applyTheme(theme: ThemePack): void {
   root.style.setProperty("--primary", theme.palette.primary);
   root.style.setProperty("--accent", theme.palette.accent);
   root.style.setProperty("--text", theme.palette.text);
+  root.style.setProperty("--font-display", `"${theme.typography.display}"`);
+  root.style.setProperty("--font-body", `"${theme.typography.body}"`);
+  root.style.setProperty("--font-mono", `"${theme.typography.mono}"`);
 }
 
 function resizeCanvas(): void {
@@ -3017,6 +3102,9 @@ function injectStyles(): void {
       --gutter: 8px;
       --hud-h: 48px;
       --rail-h: 52px;
+      --font-display: "Bebas Neue";
+      --font-body: "Rajdhani";
+      --font-mono: "JetBrains Mono";
     }
     * {
       box-sizing: border-box;
@@ -3029,7 +3117,7 @@ function injectStyles(): void {
       min-height: 100dvh;
       background: var(--bg);
       color: var(--text);
-      font-family: "Courier New", "Rajdhani", monospace;
+      font-family: var(--font-body), "Rajdhani", sans-serif;
       overflow: hidden;
       touch-action: none;
       overscroll-behavior: none;
@@ -3119,7 +3207,7 @@ function injectStyles(): void {
     }
     .card h1, .card h2 {
       margin: 0 0 10px;
-      font-family: "Bebas Neue", "Impact", sans-serif;
+      font-family: var(--font-display), "Bebas Neue", "Impact", sans-serif;
       letter-spacing: 0.08em;
       text-shadow: 0 0 16px rgba(255, 87, 204, 0.46);
     }
@@ -3130,7 +3218,7 @@ function injectStyles(): void {
     .card .score {
       font-size: 48px;
       margin: 6px 0 10px;
-      font-family: "JetBrains Mono", "Consolas", monospace;
+      font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
       font-weight: 800;
       color: var(--primary);
     }
@@ -3154,14 +3242,27 @@ function injectStyles(): void {
       letter-spacing: 0.05em;
       cursor: pointer;
       text-transform: uppercase;
+      transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background-color 120ms ease;
     }
     .btn.primary {
-      background: color-mix(in srgb, var(--primary) 25%, transparent);
+      background: color-mix(in srgb, var(--primary) 34%, transparent);
       border-color: color-mix(in srgb, var(--primary) 58%, white 8%);
-      box-shadow: 0 0 14px rgba(0, 229, 255, 0.24);
+      box-shadow: 0 0 16px rgba(0, 229, 255, 0.28);
     }
     .btn.secondary {
       background: color-mix(in srgb, var(--surface) 50%, transparent);
+    }
+    .btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(255, 255, 255, 0.45);
+    }
+    .btn:active {
+      transform: translateY(0);
+    }
+    .btn:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary) 74%, white 26%);
+      outline-offset: 2px;
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 20%, transparent);
     }
     .hidden {
       display: none !important;
@@ -3193,6 +3294,63 @@ function injectStyles(): void {
     .muted {
       opacity: 0.72;
       font-size: 12px;
+    }
+    .score-grid {
+      display: grid;
+      gap: 4px;
+      margin: 0 auto 8px;
+      width: min(100%, 300px);
+      text-align: left;
+    }
+    .score-grid p {
+      margin: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+    }
+    .score-grid strong {
+      color: var(--primary);
+      font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
+    }
+    .split-list {
+      list-style: none;
+      margin: 10px 0 0;
+      padding: 0;
+    }
+    .split-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 3px 0;
+    }
+    .split-list strong {
+      color: var(--primary);
+      font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
+    }
+    .leaderboard-list {
+      list-style: none;
+      padding: 0;
+      margin: 10px 0 0;
+      text-align: left;
+    }
+    .leaderboard-row {
+      padding: 8px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 10px;
+      margin-bottom: 8px;
+      background: rgba(6, 8, 20, 0.55);
+    }
+    .leaderboard-row.is-you {
+      border-color: color-mix(in srgb, var(--primary) 55%, white 6%);
+      box-shadow: 0 0 16px rgba(0, 229, 255, 0.12);
+    }
+    .leaderboard-head {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 3px;
     }
     .attract .eyebrow {
       margin: 0 0 6px;
@@ -3913,6 +4071,19 @@ function advanceTriathlonForTest(): void {
   }
 }
 
+function commitStageWithTransitionForTest(): void {
+  if (mode === "boot") {
+    startRun();
+    render();
+    return;
+  }
+  if (mode === "playing" || mode === "deathChoice") {
+    flow.commitUnlockedByStage[flow.currentStageIndex] = true;
+    commitCurrentStage(false);
+    render();
+  }
+}
+
 function advanceAmpWaveForTest(): void {
   if (mode !== "playing" || stage.id !== "amp-invaders") {
     return;
@@ -3936,6 +4107,7 @@ declare global {
     render_game_to_text?: () => string;
     advanceTime?: (ms: number) => void;
     advanceTriathlonForTest?: () => void;
+    commitStageWithTransitionForTest?: () => void;
     advanceAmpWaveForTest?: () => void;
     advanceAmpBossDefeatForTest?: () => void;
   }
@@ -3944,6 +4116,7 @@ declare global {
 window.render_game_to_text = renderGameToText;
 window.advanceTime = advanceTime;
 window.advanceTriathlonForTest = advanceTriathlonForTest;
+window.commitStageWithTransitionForTest = commitStageWithTransitionForTest;
 window.advanceAmpWaveForTest = advanceAmpWaveForTest;
 window.advanceAmpBossDefeatForTest = advanceAmpBossDefeatForTest;
 

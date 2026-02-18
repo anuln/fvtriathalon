@@ -10,7 +10,8 @@ test("player can complete full triathlon and see results", async ({ page }) => {
     advance?.();
     advance?.();
     advance?.();
+    advance?.();
   });
 
-  await expect(page.getByText("FINAL SCORE")).toBeVisible();
+  await expect(page.getByText("HEADLINER SCORE")).toBeVisible();
 });

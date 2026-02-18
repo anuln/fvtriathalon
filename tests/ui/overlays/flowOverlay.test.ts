@@ -4,6 +4,6 @@ import { deathChoices } from "../../../src/ui/overlays/EarlyDeathOverlay";
 describe("early death options", () => {
   it("shows retry as primary action", () => {
     const options = deathChoices();
-    expect(options.primary).toBe("RETRY HERE");
+    expect(options.primary).toBe("RUN IT BACK");
   });
 });

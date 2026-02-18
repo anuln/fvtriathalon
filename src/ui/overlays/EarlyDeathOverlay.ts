@@ -1,7 +1,9 @@
+import { deathChoiceCopy } from "../festivalUxCopy";
+
 export function deathChoices() {
   return {
-    title: "YOU WIPED EARLY",
-    primary: "RETRY HERE",
-    secondary: "COMMIT CURRENT SCORE"
+    title: deathChoiceCopy.title,
+    primary: deathChoiceCopy.primaryCta,
+    secondary: deathChoiceCopy.secondaryCta
   };
 }

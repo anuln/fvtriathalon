@@ -1,0 +1,8 @@
+2D pixel-art game sprite, transparent background, retro arcade style, hard pixel edges, no anti-aliasing, no blur, no text, no logo, no watermark, centered subject, readable silhouette at small size, high contrast.
+Create a 4-frame horizontal sprite sheet.
+Canvas: 1024x256 px total (4 frames, each 256x256).
+Subject: "Marshall Titan" enemy — stacked guitar amps with metal grill teeth, horn spikes, and cable whips; stadium-rock aesthetic.
+Mood: loud, dangerous, final-wave intensity.
+Palette: black, gunmetal, fiery orange, red highlights, white spec hits.
+Animation intent: power stance shake and overdrive glow surge.
+Keep body footprint consistent frame-to-frame.

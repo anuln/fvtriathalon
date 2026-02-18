@@ -1,0 +1,9 @@
+Create ONE game-ready 2D sprite for a POP music festival shooter enemy.
+Subject: "Confetti Cannon Beetle" - a round beetle-like drone with side cannons that puff confetti bursts and a glossy speaker-shell back.
+Style: retro pixel-art, high readability at small size, strong silhouette, no blur, no painterly strokes.
+Mood: festive but threatening.
+Palette: saturated magenta body, cyan metal parts, yellow confetti ports, bright white spark highlights, dark outline.
+Lighting: top-left light, minimal clustered shading.
+Background: fully transparent only.
+Framing: centered with padding.
+Output constraints: one sprite only, no sprite sheet, no text, no watermark.

@@ -1,0 +1,8 @@
+Create ONE game-ready 2D projectile sprite for a POP music festival shooter.
+Subject: "Pop Pulse Shot" - a compact, high-speed projectile shaped like a glowing heart-note hybrid with a short sparkle trail.
+Style: retro pixel-art, crisp edges, strong silhouette at small size, no blurry gradients, no anti-aliased paint.
+Palette: electric pink core, cyan edge glow, tiny yellow sparkle accents, dark outline for readability.
+Motion cue: the shape should imply forward movement to the right.
+Background: fully transparent background only (no scene, no text).
+Framing: centered sprite with generous padding so it can be trimmed/atlas-packed later.
+Output constraints: single projectile sprite only, not a sheet, no extra objects, no watermark.

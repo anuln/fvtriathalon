@@ -1,0 +1,9 @@
+Create ONE game-ready 2D sprite for a POP music festival shooter enemy.
+Subject: "Neon Balloon Jelly" - a floating jellyfish-like stage prop creature with translucent balloon dome, dangling glow tassels, and tiny speaker core.
+Style: retro pixel-art, clear silhouette, chunky pixel clusters, crisp hard edges, no soft blur.
+Mood: dreamy pop-night ambiance with light menace.
+Palette: pastel pink dome, cyan tassel glow, yellow electric accents, white specular dots, black outline details.
+Lighting: top-left, subtle rim on lower-right.
+Background: fully transparent only.
+Framing: centered with generous padding.
+Output constraints: single character sprite only, no background, no UI, no text, no watermark.

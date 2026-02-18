@@ -1,0 +1,9 @@
+Create ONE game-ready 2D sprite for a POP music festival shooter enemy.
+Subject: "Starburst Skater Bot" - a compact hovering bot with star-shaped shoulder fins, roller-disco wheel pods, and a tiny LED visor.
+Style: retro pixel-art, crisp readable silhouette, chunky pixel clusters, no blurry anti-aliasing, bold outline.
+Mood: upbeat, playful, energetic concert vibe.
+Palette: hot pink, cyan, lemon yellow, white highlight pops, limited black outline.
+Lighting: top-left key light, simple 2-3 shade ramps.
+Background: fully transparent only.
+Framing: centered with safe padding.
+Output constraints: single sprite only, no text, no logos, no watermark, no environment.

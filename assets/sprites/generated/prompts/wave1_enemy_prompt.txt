@@ -1,0 +1,9 @@
+Create ONE game-ready 2D sprite for a POP music festival shooter enemy.
+Subject: "Bubblebeat Drone" - a cute but dangerous hovering drone made from a glossy speaker orb, tiny stage-light wings, and confetti vents.
+Style: retro pixel-art, clean silhouette, chunky readable forms, no anti-aliased blur, hand-crafted sprite look, bold outline, high contrast.
+Mood: bright, playful, pop-concert energy.
+Palette: hot pink, cyan, lemon yellow, white highlights, small black outline accents.
+Lighting: top-left light source, subtle rim light, minimal shading clusters.
+Background: fully transparent background only (no scene, no floor, no text).
+Framing: centered sprite with safe padding on all sides.
+Output constraints: single sprite only, not a sprite sheet, no UI elements, no logos, no watermark.
