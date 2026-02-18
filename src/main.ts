@@ -27,7 +27,6 @@ type Mode =
   | "playing"
   | "deathPause"
   | "deathChoice"
-  | "commitConfirm"
   | "transition"
   | "results"
   | "leaderboard";
@@ -85,7 +84,7 @@ app.innerHTML = `
     <header class="hud">
       <div class="hud-item" id="hud-time">09:00</div>
       <div class="hud-item hud-stage" id="hud-stage">Stage 1/3</div>
-      <div class="hud-item" id="hud-bank">TP 0</div>
+      <div class="hud-item" id="hud-bank">Triathalon Score: 0</div>
     </header>
     <section class="canvas-wrap">
       <canvas id="game-canvas"></canvas>
@@ -97,7 +96,7 @@ app.innerHTML = `
         <span id="hud-score">Score: 0</span>
         <span id="hud-hint"></span>
       </div>
-      <button id="commit-btn" class="btn primary hidden">Commit & Move On</button>
+      <button id="commit-btn" class="btn primary hidden">Finish Stage</button>
     </footer>
   </div>
 `;
@@ -127,9 +126,10 @@ let stageAttemptStartMs = 0;
 let stage: StageRuntime = createStage(flow.currentStageIndex);
 let deathPauseRemainingMs = 0;
 let transitionRemainingMs = 0;
-let transitionFrom = "";
-let transitionTo = "";
-let commitConfirmReturnMode: "playing" | "deathChoice" = "playing";
+let transitionCommittedStageIndex = 0;
+let transitionStageRawScore = 0;
+let transitionStageBankedScore = 0;
+let transitionTotalScore = 0;
 let submittedScore = false;
 let frameWidth = 960;
 let frameHeight = 540;
@@ -187,7 +187,7 @@ window.addEventListener("keydown", (event) => {
   }
   if (event.key === "c" || event.key === "C") {
     if (mode === "deathChoice" || (mode === "playing" && canCommitNow(flow))) {
-      openCommitConfirm(mode === "deathChoice" ? "deathChoice" : "playing");
+      commitCurrentStage(false);
     }
   }
   if (event.key === "Escape") {
@@ -210,11 +210,9 @@ overlay.addEventListener("click", (event) => {
   } else if (action === "retry") {
     onRetry();
   } else if (action === "open-commit") {
-    openCommitConfirm("playing");
-  } else if (action === "confirm-commit") {
     commitCurrentStage(false);
-  } else if (action === "cancel-commit") {
-    mode = commitConfirmReturnMode;
+  } else if (action === "continue-stage") {
+    completeTransition();
   } else if (action === "play-again") {
     mode = "boot";
     runActive = false;
@@ -230,7 +228,7 @@ overlay.addEventListener("click", (event) => {
   }
 });
 
-commitBtn.addEventListener("click", () => openCommitConfirm("playing"));
+commitBtn.addEventListener("click", () => commitCurrentStage(false));
 
 adminPanel.addEventListener("change", (event) => {
   const target = event.target as HTMLInputElement | HTMLSelectElement;
@@ -321,8 +319,7 @@ function tick(dtMs: number): void {
   } else if (mode === "transition") {
     transitionRemainingMs -= dtMs;
     if (transitionRemainingMs <= 0) {
-      startStage(flow.currentStageIndex);
-      mode = "playing";
+      completeTransition();
     }
   }
 
@@ -356,7 +353,7 @@ function render(): void {
     mode
   );
 
-  if (mode === "playing" || mode === "deathPause" || mode === "deathChoice" || mode === "commitConfirm") {
+  if (mode === "playing" || mode === "deathPause" || mode === "deathChoice") {
     stage.draw(ctx, frameWidth, frameHeight, activeTheme, pulse);
   } else {
     drawIdleBackdrop(ctx, frameWidth, frameHeight, activeTheme, pulse);
@@ -372,7 +369,7 @@ function syncHud(): void {
   const leftMs = Math.max(0, RUN_TOTAL_MS - globalElapsedMs);
   hudTime.textContent = formatMs(leftMs);
   hudStage.textContent = mode === "results" || mode === "leaderboard" ? "Run Complete" : `Stage ${flow.currentStageIndex + 1}/3`;
-  hudBank.textContent = `TP ${totalBankedTri()}`;
+  hudBank.textContent = `Triathalon Score: ${totalBankedTri()}`;
   hudScore.textContent = `Score: ${Math.round(flow.stageRaw)}`;
   hudHint.textContent = stage.getHudHint();
 }
@@ -412,39 +409,32 @@ function syncOverlay(): void {
     markup = `
       <div class="card">
         <h2>Stage Ended</h2>
-        <p>Retry here or move on. You cannot return once committed.</p>
+        <p>Retry here or bank this stage score and continue.</p>
         <div class="row">
           <button class="btn primary" data-action="retry">RETRY HERE</button>
-          <button class="btn secondary" data-action="open-commit">COMMIT & MOVE ON</button>
-        </div>
-      </div>
-    `;
-  } else if (mode === "commitConfirm") {
-    const nextLabel = flow.currentStageIndex >= 2 ? "Results" : STAGE_NAMES[flow.currentStageIndex + 1];
-    markup = `
-      <div class="card">
-        <h2>Move to Next Stage?</h2>
-        <p>You can’t return to this stage in this run.</p>
-        <p class="muted">Up next: ${nextLabel}</p>
-        <div class="row">
-          <button class="btn primary" data-action="confirm-commit">COMMIT</button>
-          <button class="btn secondary" data-action="cancel-commit">KEEP PLAYING</button>
+          <button class="btn secondary" data-action="open-commit">BANK SCORE & CONTINUE</button>
         </div>
       </div>
     `;
   } else if (mode === "transition") {
+    const nextLabel = flow.currentStageIndex >= STAGE_NAMES.length ? "Results" : STAGE_NAMES[flow.currentStageIndex];
     markup = `
-      <div class="card compact">
-        <h2>Stage Complete</h2>
-        <p>${transitionFrom} -> ${transitionTo}</p>
-        <p>Total TriPoints: ${totalBankedTri()}</p>
+      <div class="card">
+        <h2>Stage ${transitionCommittedStageIndex + 1} Complete</h2>
+        <p>Stage Score: ${Math.round(transitionStageRawScore)}</p>
+        <p>Score Earned: +${transitionStageBankedScore}</p>
+        <p>Triathalon Score: ${transitionTotalScore}</p>
+        <p class="muted">Next: ${nextLabel}</p>
+        <div class="row">
+          <button class="btn primary" data-action="continue-stage">CONTINUE</button>
+        </div>
       </div>
     `;
   } else if (mode === "results") {
     const splits = flow.bankedTri.map((value, idx) => `<li>${STAGE_NAMES[idx]}: ${value}</li>`).join("");
     markup = `
       <div class="card results">
-        <h2>FINAL TRIPOINTS</h2>
+        <h2>FINAL TRIATHALON SCORE</h2>
         <p class="score">${totalBankedTri()}</p>
         <ul>${splits}</ul>
         <div class="row">
@@ -533,27 +523,29 @@ function startStage(index: number): void {
   stageAttemptStartMs = globalElapsedMs;
 }
 
-function openCommitConfirm(returnMode: "playing" | "deathChoice"): void {
-  if (!canCommitNow(flow)) {
-    return;
-  }
-  commitConfirmReturnMode = returnMode;
-  mode = "commitConfirm";
-}
-
 function onRetry(): void {
   retryStage(flow);
   startStage(flow.currentStageIndex);
   mode = "playing";
 }
 
+function completeTransition(): void {
+  if (mode !== "transition") {
+    return;
+  }
+  startStage(flow.currentStageIndex);
+  mode = "playing";
+}
+
 function commitCurrentStage(skipTransition: boolean): void {
+  if (!canCommitNow(flow)) {
+    return;
+  }
   const stageId = STAGE_IDS[flow.currentStageIndex];
   const raw = Math.max(0, stage.getRawScore());
   const tri = Math.round(toTriPoints(stageId, raw));
   flow.stageRaw = raw;
   const fromIndex = flow.currentStageIndex;
-  const fromName = STAGE_NAMES[fromIndex];
 
   advanceStage(flow, tri);
   audio.trigger("commit");
@@ -570,9 +562,11 @@ function commitCurrentStage(skipTransition: boolean): void {
     return;
   }
 
-  transitionFrom = fromName;
-  transitionTo = STAGE_NAMES[flow.currentStageIndex];
-  transitionRemainingMs = 3000;
+  transitionCommittedStageIndex = fromIndex;
+  transitionStageRawScore = raw;
+  transitionStageBankedScore = tri;
+  transitionTotalScore = totalBankedTri();
+  transitionRemainingMs = 2000;
   mode = "transition";
 }
 
@@ -1567,6 +1561,7 @@ function createAmpInvadersStage(): StageRuntime {
   let lives = 3;
   let genre: "jazz" | "rock" | "edm" | "metal" = "jazz";
   let playerX = 0.5;
+  let playerVelX = 0;
   let autoFireCooldownMs = 0;
   let chargeMs = 0;
   let wasHoldingAction = false;
@@ -1604,6 +1599,33 @@ function createAmpInvadersStage(): StageRuntime {
     return enemies.filter((enemy) => enemy.alive);
   }
 
+  function fitEnemyFormationToViewport(width: number): void {
+    const alive = aliveEnemies();
+    if (alive.length === 0) {
+      return;
+    }
+    const minX = Math.min(...alive.map((enemy) => enemy.x));
+    const maxX = Math.max(...alive.map((enemy) => enemy.x));
+    const span = Math.max(1, maxX - minX);
+    const pad = Math.max(24, Math.min(56, Math.floor(width * 0.1)));
+    const maxSpan = Math.max(120, width - pad * 2);
+    const scale = span > maxSpan ? maxSpan / span : 1;
+    const sourceCenter = (minX + maxX) * 0.5;
+    const targetCenter = width * 0.5;
+    const needsCentering = Math.abs(sourceCenter - targetCenter) > 2;
+    if (scale >= 0.999 && !needsCentering) {
+      return;
+    }
+    const applyScale = Math.min(1, Math.max(0.1, scale));
+    enemies.forEach((enemy) => {
+      if (!enemy.alive) {
+        return;
+      }
+      enemy.x = targetCenter + (enemy.x - sourceCenter) * applyScale;
+      enemy.x = Math.max(pad, Math.min(width - pad, enemy.x));
+    });
+  }
+
   function stageBottomReached(height: number): boolean {
     return aliveEnemies().some((enemy) => enemy.y > height - 120);
   }
@@ -1628,8 +1650,21 @@ function createAmpInvadersStage(): StageRuntime {
       if (input.right) steer += 1;
       steer += input.steerX;
       steer = Math.max(-1, Math.min(1, steer));
-      playerX = Math.max(0.06, Math.min(0.94, playerX + (steer * dtMs * 0.0006)));
+      const targetVelX = steer * 0.58;
+      const steerResponse = Math.min(1, dtMs / 80);
+      playerVelX += (targetVelX - playerVelX) * steerResponse;
+      if (Math.abs(steer) < 0.04) {
+        const driftDamping = Math.max(0, 1 - dtMs * 0.0085);
+        playerVelX *= driftDamping;
+      }
+      playerX += playerVelX * (dtMs / 1000);
+      if (playerX <= 0.06 || playerX >= 0.94) {
+        playerVelX = 0;
+      }
+      playerX = Math.max(0.06, Math.min(0.94, playerX));
       input.consumeSwipe();
+
+      fitEnemyFormationToViewport(width);
 
       const fireInterval = Math.max(95, 185 - wave * 3);
       const auto = stepAutoFire(autoFireCooldownMs, dtMs, fireInterval);
@@ -1664,13 +1699,15 @@ function createAmpInvadersStage(): StageRuntime {
         chargeMs = 0;
       }
 
-      const minX = Math.min(...aliveEnemies().map((enemy) => enemy.x));
-      const maxX = Math.max(...aliveEnemies().map((enemy) => enemy.x));
+      const alive = aliveEnemies();
+      const minX = Math.min(...alive.map((enemy) => enemy.x));
+      const maxX = Math.max(...alive.map((enemy) => enemy.x));
       if (Number.isFinite(minX) && Number.isFinite(maxX)) {
-        if (minX < 40 && enemyDir < 0) {
+        const edgePad = Math.max(20, Math.min(44, Math.floor(width * 0.08)));
+        if (minX < edgePad && enemyDir < 0) {
           enemyDir = 1;
           enemies.forEach((enemy) => (enemy.y += 16));
-        } else if (maxX > width - 40 && enemyDir > 0) {
+        } else if (maxX > width - edgePad && enemyDir > 0) {
           enemyDir = -1;
           enemies.forEach((enemy) => (enemy.y += 16));
         }
@@ -1888,11 +1925,15 @@ function createAmpInvadersStage(): StageRuntime {
       return `Wave ${wave} • ${genre.toUpperCase()} • Lives ${lives} • AUTO-FIRE`;
     },
     debugState() {
+      const alive = aliveEnemies();
       return {
         wave,
         genre,
         lives,
-        aliveEnemies: aliveEnemies().length,
+        playerX,
+        enemyMinY: alive.length ? Math.min(...alive.map((enemy) => enemy.y)) : null,
+        enemyMaxY: alive.length ? Math.max(...alive.map((enemy) => enemy.y)) : null,
+        aliveEnemies: alive.length,
         totalShotsFired
       };
     }
@@ -3192,7 +3233,7 @@ function advanceTriathlonForTest(): void {
     render();
     return;
   }
-  if (mode === "playing" || mode === "deathChoice" || mode === "commitConfirm") {
+  if (mode === "playing" || mode === "deathChoice") {
     flow.commitUnlockedByStage[flow.currentStageIndex] = true;
     commitCurrentStage(true);
     render();

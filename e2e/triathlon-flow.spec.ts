@@ -12,5 +12,5 @@ test("player can complete full triathlon and see results", async ({ page }) => {
     advance?.();
   });
 
-  await expect(page.getByText("FINAL TRIPOINTS")).toBeVisible();
+  await expect(page.getByText("FINAL TRIATHALON SCORE")).toBeVisible();
 });

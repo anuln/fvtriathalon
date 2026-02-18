@@ -207,3 +207,54 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
 - Verification (fresh):
   - `npm run test:e2e -- e2e/mobile-hit-target.spec.ts`: pass (2 passed)
   - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts`: pass (9 passed)
+
+- Stage 3 (Amp Invaders) mobile stability + control smoothness fix:
+  - Reproduced bug with new failing E2E in `e2e/amp-autofire.spec.ts`:
+    - `amp invaders does not collapse enemy block into instant stage loss on mobile`
+    - Failure showed mode became `deathPause` within ~3s on 390x844.
+  - Root-cause identified:
+    - enemy formation used fixed desktop spawn x-positions.
+    - on narrow mobile widths, formation span exceeded playable width and triggered boundary flip/drop oscillation, causing rapid forced descent and instant loss.
+  - Implemented fix in `src/main.ts` (Amp Invaders stage):
+    - added `fitEnemyFormationToViewport(width)` to compress/recenter alive enemy block for viewport width.
+    - applied dynamic edge padding for direction flips.
+    - retained drop behavior only on legitimate edge hits.
+  - Improved Stage 3 steering feel in `src/main.ts`:
+    - replaced direct position jump with velocity-smoothed steering (`playerVelX`) with damping.
+    - keeps touch drag steering responsive but less jittery.
+  - Expanded debug state for Stage 3 telemetry:
+    - `playerX`, `enemyMinY`, `enemyMaxY`.
+  - Added another E2E for controls quality:
+    - `amp invaders touch steering moves smoothly in both directions on mobile`.
+- Verification (fresh):
+  - `npm run test`: pass
+  - `npm run lint`: pass
+  - `npm run build`: pass
+  - `npm run test:e2e -- e2e/amp-autofire.spec.ts`: pass
+  - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (13 passed)
+
+- Stage flow simplification + score terminology update:
+  - Removed redundant two-step commit flow (commit modal + confirm modal).
+  - New behavior:
+    - `Finish Stage` action commits directly when eligible.
+    - single transition summary card appears between stages with key info and `CONTINUE`.
+    - no extra confirmation modal.
+  - Updated death-choice continue path to align with same single-screen flow:
+    - button now `BANK SCORE & CONTINUE` and routes directly to transition summary.
+  - Transition summary content now includes:
+    - Stage complete number
+    - Stage Score
+    - Score Earned
+    - Triathalon Score
+    - Next stage label
+  - Player-facing terminology updated:
+    - HUD bank label -> `Triathalon Score`
+    - final results title -> `FINAL TRIATHALON SCORE`
+- New/updated tests:
+  - Added `e2e/stage-flow.spec.ts` for single-screen transition flow.
+  - Updated `e2e/triathlon-flow.spec.ts` expected final heading copy.
+- Verification (fresh):
+  - `npm run test`: pass
+  - `npm run lint`: pass
+  - `npm run build`: pass
+  - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts e2e/stage-flow.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (14 passed)
