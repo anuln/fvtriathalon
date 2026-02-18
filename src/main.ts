@@ -31,9 +31,13 @@ import {
   STAGE3_V2_DEFAULT_CONFIG,
   type GenreId,
   type SpreadTier,
+  getAggressionSpec,
   getWaveSpec
 } from "./games/amp-invaders/stage3v2Config";
 import { createWaveDirectorV2 } from "./games/amp-invaders/waveDirectorV2";
+import { createEnemyDirector } from "./games/amp-invaders/enemyDirector";
+import { createBossDirector } from "./games/amp-invaders/bossDirector";
+import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specials";
 import { createZoneMusicState, updateZoneMusicState } from "./games/moshpit-pacman/zoneMusicState";
 
 type StageId = "rhythm-serpent" | "moshpit-pacman" | "amp-invaders";
@@ -72,9 +76,11 @@ type StageRuntime = {
   ) => void;
   getRawScore: () => number;
   isDead: () => boolean;
+  isCleared?: () => boolean;
   getHudHint: () => string;
   debugState: () => unknown;
   forceWaveClearForTest?: () => void;
+  forceBossDefeatForTest?: () => void;
 };
 
 const STAGE_IDS: StageId[] = ["rhythm-serpent", "moshpit-pacman", "amp-invaders"];
@@ -324,6 +330,12 @@ function tick(dtMs: number): void {
     flow.stageRaw = stage.getRawScore();
     markCommitUnlockedIfEligible(flow, false);
 
+    if (stage.isCleared?.()) {
+      flow.commitUnlockedByStage[flow.currentStageIndex] = true;
+      commitCurrentStage(true);
+      return;
+    }
+
     if (stage.isDead()) {
       markCommitUnlockedIfEligible(flow, true);
       mode = "deathPause";
@@ -334,11 +346,6 @@ function tick(dtMs: number): void {
     deathPauseRemainingMs -= dtMs;
     if (deathPauseRemainingMs <= 0) {
       mode = "deathChoice";
-    }
-  } else if (mode === "transition") {
-    transitionRemainingMs -= dtMs;
-    if (transitionRemainingMs <= 0) {
-      completeTransition();
     }
   }
 
@@ -1635,7 +1642,12 @@ function createAmpInvadersStage(): StageRuntime {
 
   let score = 0;
   let dead = false;
+  let cleared = false;
+  let stageElapsedMs = 0;
   const waveDirector = createWaveDirectorV2(STAGE3_V2_DEFAULT_CONFIG);
+  const enemyDirector = createEnemyDirector(STAGE3_V2_DEFAULT_CONFIG);
+  const bossDirector = createBossDirector(STAGE3_V2_DEFAULT_CONFIG);
+  const specialsState = createSpecialsState(STAGE3_V2_DEFAULT_CONFIG);
   let waveState = waveDirector.getState();
   let wave = waveState.wave;
   let lives = 3;
@@ -1652,7 +1664,6 @@ function createAmpInvadersStage(): StageRuntime {
   let chargeMs = 0;
   let wasHoldingAction = false;
   let enemyFireCooldownMs = 900;
-  let enemyFireCadenceScale = 1;
   let discoTimerMs = 8000;
   let disco: { active: boolean; x: number; y: number; vx: number } = { active: false, x: 0, y: 48, vx: 220 };
   const bullets: Bullet[] = [];
@@ -1661,26 +1672,37 @@ function createAmpInvadersStage(): StageRuntime {
   let enemySpeed = 40;
   let enemies: Enemy[] = spawnWave(wave);
   let totalShotsFired = 0;
+  let totalEnemyShotsFired = 0;
+  let lastEnemyPattern: "single" | "dual" | "burst" = "single";
+  let inBoss = false;
+  let bossX = 0;
+  let bossY = 84;
+  let bossDir = 1;
+  let bossSpeed = 92;
+  let bossDefeatAwarded = false;
+  let lastSpecialKind: "diveBomber" | "shieldBreaker" | null = null;
 
   function spawnWave(level: number): Enemy[] {
     const waveSpec = getWaveSpec(STAGE3_V2_DEFAULT_CONFIG, level);
+    const aggression = getAggressionSpec(STAGE3_V2_DEFAULT_CONFIG, level);
     const list: Enemy[] = [];
     const rows = waveSpec.rows;
     const cols = waveSpec.cols;
+    const hpBoost = level >= 3 ? 1 : 0;
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
         const type = r < waveSpec.eliteRows ? "elite" : r < waveSpec.eliteRows + waveSpec.armoredRows ? "armored" : "basic";
+        const baseHp = type === "elite" ? 3 : type === "armored" ? 2 : 1;
         list.push({
           x: 120 + c * 68,
           y: 80 + r * 52,
           type,
-          hp: type === "elite" ? 3 : type === "armored" ? 2 : 1,
+          hp: Math.max(1, Math.round((baseHp + hpBoost) * Math.max(1, aggression.bulletSpeedScale * 0.92))),
           alive: true
         });
       }
     }
     enemySpeed = (40 + level * 8) * waveSpec.speedScale;
-    enemyFireCadenceScale = waveSpec.fireCadenceScale;
     return list;
   }
 
@@ -1719,10 +1741,69 @@ function createAmpInvadersStage(): StageRuntime {
     return aliveEnemies().some((enemy) => enemy.y > height - 120);
   }
 
+  function spawnEnemyFirePattern(
+    plan: { shots: number; pattern: "single" | "dual" | "burst"; speedScale: number },
+    shooters: Enemy[],
+    width: number
+  ): number {
+    if (shooters.length === 0) {
+      return 0;
+    }
+    const spawned: Bullet[] = [];
+    const baseSpeed = (280 + wave * 12) * plan.speedScale;
+    const seed = Math.floor(stageElapsedMs / 180) + wave * 7 + shooters.length;
+    const first = shooters[((seed % shooters.length) + shooters.length) % shooters.length];
+    const second = shooters[((seed + Math.floor(shooters.length / 2) + 1) % shooters.length + shooters.length) % shooters.length];
+
+    if (plan.pattern === "single") {
+      spawned.push({ x: first.x, y: first.y + 12, vx: 0, vy: baseSpeed, damage: 1, enemy: true });
+    } else if (plan.pattern === "dual") {
+      spawned.push({ x: first.x, y: first.y + 12, vx: -42, vy: baseSpeed, damage: 1, enemy: true });
+      spawned.push({ x: second.x, y: second.y + 12, vx: 42, vy: baseSpeed, damage: 1, enemy: true });
+    } else {
+      const vxSpread = [-120, -40, 40, 120];
+      for (let i = 0; i < plan.shots; i += 1) {
+        const vx = vxSpread[i % vxSpread.length] ?? 0;
+        spawned.push({ x: first.x, y: first.y + 12, vx, vy: baseSpeed + Math.abs(vx) * 0.22, damage: 1, enemy: true });
+      }
+    }
+
+    for (const bullet of spawned) {
+      bullet.x = Math.max(20, Math.min(width - 20, bullet.x));
+      bullets.push(bullet);
+    }
+    return spawned.length;
+  }
+
+  function spawnBossAttack(pattern: "sweep" | "volley" | "enrageBurst", width: number): number {
+    const spawned: Bullet[] = [];
+    if (pattern === "sweep") {
+      const vxList = [-220, -120, 0, 120, 220];
+      for (const vx of vxList) {
+        spawned.push({ x: bossX, y: bossY + 28, vx, vy: 320 + Math.abs(vx) * 0.2, damage: 1, enemy: true });
+      }
+    } else if (pattern === "volley") {
+      const aimDx = playerX * width - bossX;
+      const clampedAim = Math.max(-160, Math.min(160, aimDx * 0.6));
+      const vxList = [clampedAim - 90, clampedAim, clampedAim + 90];
+      for (const vx of vxList) {
+        spawned.push({ x: bossX, y: bossY + 28, vx, vy: 350, damage: 1, enemy: true });
+      }
+    } else {
+      const vxList = [-260, -170, -90, 0, 90, 170, 260];
+      for (const vx of vxList) {
+        spawned.push({ x: bossX, y: bossY + 28, vx, vy: 360 + Math.abs(vx) * 0.18, damage: 1, enemy: true });
+      }
+    }
+    bullets.push(...spawned);
+    return spawned.length;
+  }
+
   return {
     id: "amp-invaders",
     update(dtMs, input, width, height) {
-      if (dead) return;
+      if (dead || cleared) return;
+      stageElapsedMs += dtMs;
 
       enemyFireCooldownMs -= dtMs;
       discoTimerMs -= dtMs;
@@ -1793,35 +1874,60 @@ function createAmpInvadersStage(): StageRuntime {
         chargeMs = 0;
       }
 
-      const alive = aliveEnemies();
-      const minX = Math.min(...alive.map((enemy) => enemy.x));
-      const maxX = Math.max(...alive.map((enemy) => enemy.x));
-      if (Number.isFinite(minX) && Number.isFinite(maxX)) {
-        const edgePad = Math.max(20, Math.min(44, Math.floor(width * 0.08)));
-        if (minX < edgePad && enemyDir < 0) {
-          enemyDir = 1;
-          enemies.forEach((enemy) => (enemy.y += 16));
-        } else if (maxX > width - edgePad && enemyDir > 0) {
-          enemyDir = -1;
-          enemies.forEach((enemy) => (enemy.y += 16));
+      if (!inBoss) {
+        const alive = aliveEnemies();
+        const minX = Math.min(...alive.map((enemy) => enemy.x));
+        const maxX = Math.max(...alive.map((enemy) => enemy.x));
+        if (Number.isFinite(minX) && Number.isFinite(maxX)) {
+          const edgePad = Math.max(20, Math.min(44, Math.floor(width * 0.08)));
+          if (minX < edgePad && enemyDir < 0) {
+            enemyDir = 1;
+            enemies.forEach((enemy) => (enemy.y += 16));
+          } else if (maxX > width - edgePad && enemyDir > 0) {
+            enemyDir = -1;
+            enemies.forEach((enemy) => (enemy.y += 16));
+          }
+        }
+
+        enemies.forEach((enemy) => {
+          if (!enemy.alive) return;
+          enemy.x += enemyDir * enemySpeed * (dtMs / 1000);
+        });
+      } else {
+        const bossPad = Math.max(96, width * 0.14);
+        bossX += bossDir * bossSpeed * (dtMs / 1000);
+        if (bossX < bossPad) {
+          bossX = bossPad;
+          bossDir = 1;
+        } else if (bossX > width - bossPad) {
+          bossX = width - bossPad;
+          bossDir = -1;
         }
       }
 
-      enemies.forEach((enemy) => {
-        if (!enemy.alive) return;
-        enemy.x += enemyDir * enemySpeed * (dtMs / 1000);
-      });
-
-      if (enemyFireCooldownMs <= 0) {
+      if (!inBoss && enemyFireCooldownMs <= 0) {
         const shooters = aliveEnemies();
         if (shooters.length > 0) {
-          const shooter = shooters[Math.floor(Math.random() * shooters.length)];
-          bullets.push({ x: shooter.x, y: shooter.y + 12, vx: 0, vy: 280 + wave * 12, damage: 1, enemy: true });
+          const plan = enemyDirector.computeFirePlan({
+            wave,
+            elapsedMs: stageElapsedMs,
+            aliveEnemies: shooters.length
+          });
+          lastEnemyPattern = plan.pattern;
+          const shotCount = spawnEnemyFirePattern(plan, shooters, width);
+          totalEnemyShotsFired += shotCount;
+          enemyFireCooldownMs = plan.cooldownMs;
+        } else {
+          enemyFireCooldownMs = 300;
         }
-        enemyFireCooldownMs = Math.max(320, (900 - wave * 30) * enemyFireCadenceScale);
+      } else if (inBoss) {
+        const event = bossDirector.update(dtMs);
+        if (event.attackFired && event.pattern) {
+          totalEnemyShotsFired += spawnBossAttack(event.pattern, width);
+        }
       }
 
-      if (discoTimerMs <= 0 && !disco.active) {
+      if (!inBoss && discoTimerMs <= 0 && !disco.active) {
         disco.active = true;
         disco.x = -40;
         disco.y = 52;
@@ -1835,6 +1941,16 @@ function createAmpInvadersStage(): StageRuntime {
           discoTimerMs = 10_000;
         }
       }
+
+      updateSpecials(specialsState, {
+        dtMs,
+        elapsedMs: stageElapsedMs,
+        wave,
+        width,
+        height,
+        bossActive: inBoss
+      });
+      lastSpecialKind = specialsState.lastSpawnKind;
 
       for (const bullet of bullets) {
         bullet.x += bullet.vx * (dtMs / 1000);
@@ -1878,6 +1994,19 @@ function createAmpInvadersStage(): StageRuntime {
             }
           }
 
+          if (inBoss) {
+            const inBossHitbox = Math.abs(bullet.x - bossX) < 66 && Math.abs(bullet.y - bossY) < 38;
+            if (inBossHitbox) {
+              bossDirector.applyDamage(Math.max(1, bullet.damage));
+              bullet.y = -120;
+              if (bossDirector.isDefeated() && !bossDefeatAwarded) {
+                bossDefeatAwarded = true;
+                score += 900;
+                cleared = true;
+              }
+            }
+          }
+
           if (disco.active && Math.abs(bullet.x - disco.x) < 24 && Math.abs(bullet.y - disco.y) < 16) {
             score += 220;
             disco.active = false;
@@ -1888,24 +2017,61 @@ function createAmpInvadersStage(): StageRuntime {
         }
       }
 
+      for (const special of specialsState.entities) {
+        if (special.state !== "diving") {
+          continue;
+        }
+        const hit = resolveEnemyBulletHit({
+          bulletX: special.x,
+          bulletY: special.y,
+          width,
+          height,
+          playerXNorm: playerX,
+          shields
+        });
+        if (hit.shieldIndex !== null) {
+          const extra = special.kind === "shieldBreaker" ? 24 : 14;
+          shields[hit.shieldIndex] = Math.max(0, shields[hit.shieldIndex] - extra);
+          special.consumed = true;
+        } else if (hit.playerHit) {
+          lives -= 1;
+          if (lives <= 0) {
+            dead = true;
+          }
+          special.consumed = true;
+        }
+      }
+
       for (let i = bullets.length - 1; i >= 0; i -= 1) {
         if (bullets[i].y < -120 || bullets[i].y > height + 120) {
           bullets.splice(i, 1);
         }
       }
 
-      if (aliveEnemies().length === 0) {
-        waveState = waveDirector.advanceOnWaveClear();
-        wave = waveState.wave;
-        genre = waveState.genre;
-        spreadTier = waveState.spreadTier;
-        nextUpgradeWave = waveState.nextUpgradeWave;
-        score += 120;
-        enemies = spawnWave(wave);
-        enemyDir = 1;
+      if (!inBoss && aliveEnemies().length === 0) {
+        if (wave >= STAGE3_V2_DEFAULT_CONFIG.boss.entryWave) {
+          inBoss = true;
+          bossX = width * 0.5;
+          bossY = 84;
+          bossDir = 1;
+          bossSpeed = 92;
+          bossDirector.enter();
+          specialsState.entities.length = 0;
+          enemyFireCooldownMs = 420;
+          score += 300;
+        } else {
+          waveState = waveDirector.advanceOnWaveClear();
+          wave = waveState.wave;
+          genre = waveState.genre;
+          spreadTier = waveState.spreadTier;
+          nextUpgradeWave = waveState.nextUpgradeWave;
+          score += 120;
+          enemies = spawnWave(wave);
+          enemyDir = 1;
+        }
       }
 
-      if (stageBottomReached(height)) {
+      if (!inBoss && stageBottomReached(height)) {
         dead = true;
       }
     },
@@ -1997,6 +2163,45 @@ function createAmpInvadersStage(): StageRuntime {
         }
       });
 
+      for (const special of specialsState.entities) {
+        if (special.state === "telegraph") {
+          context.strokeStyle = withAlpha("#ffef86", 0.9);
+          context.lineWidth = 2;
+          context.beginPath();
+          context.moveTo(special.x, 20);
+          context.lineTo(special.x, height - 120);
+          context.stroke();
+          context.fillStyle = withAlpha("#ffef86", 0.92);
+          context.fillRect(special.x - 9, 18, 18, 8);
+          continue;
+        }
+        context.fillStyle = special.kind === "shieldBreaker" ? withAlpha("#ff8844", 0.95) : withAlpha("#ffd447", 0.95);
+        context.beginPath();
+        context.arc(special.x, special.y, special.kind === "shieldBreaker" ? 14 : 11, 0, Math.PI * 2);
+        context.fill();
+      }
+
+      if (inBoss) {
+        const bossState = bossDirector.getState();
+        context.fillStyle = withAlpha("#1a1a24", 0.94);
+        context.fillRect(bossX - 72, bossY - 24, 144, 48);
+        context.strokeStyle = withAlpha("#ff7ce7", 0.8);
+        context.lineWidth = 2;
+        context.strokeRect(bossX - 72, bossY - 24, 144, 48);
+        context.fillStyle = withAlpha("#22ddff", 0.78);
+        context.fillRect(bossX - 64, bossY - 16, 128 * (bossState.hp / bossState.maxHp), 8);
+        context.fillStyle = withAlpha("#f7f7ff", 0.9);
+        context.font = "12px monospace";
+        context.fillText(`BOSS P${bossState.phase}`, bossX - 34, bossY + 18);
+        if (bossState.telegraphActive) {
+          context.strokeStyle = withAlpha("#ff4a4a", 0.9);
+          context.beginPath();
+          context.moveTo(0, bossY + 36);
+          context.lineTo(width, bossY + 36);
+          context.stroke();
+        }
+      }
+
       bullets.forEach((bullet) => {
         context.fillStyle = bullet.enemy ? "#ff5a36" : "#ccfff2";
         context.fillRect(bullet.x - 2, bullet.y - 9, 4, 18);
@@ -2023,18 +2228,35 @@ function createAmpInvadersStage(): StageRuntime {
     isDead() {
       return dead;
     },
+    isCleared() {
+      return cleared;
+    },
     getHudHint() {
+      if (inBoss) {
+        const boss = bossDirector.getState();
+        return `BOSS PHASE ${boss.phase} • HP ${Math.max(0, Math.round(boss.hp))} • Lives ${lives}`;
+      }
       const tierLabel = spreadTier === 1 ? "SINGLE" : spreadTier === 2 ? "DUAL" : spreadTier === 3 ? "TRIPLE" : "WIDE";
       return `Wave ${wave} • ${genre.toUpperCase()} • ${tierLabel} • Lives ${lives} • AUTO-FIRE`;
     },
     debugState() {
       const alive = aliveEnemies();
+      const boss = bossDirector.getState();
       return {
         wave,
         genre,
         spreadTier,
         nextUpgradeWave,
         lives,
+        totalEnemyShotsFired,
+        lastEnemyPattern,
+        totalSpecialSpawns: specialsState.totalSpawns,
+        lastSpecialKind,
+        activeSpecialCount: specialsState.entities.length,
+        bossActive: inBoss,
+        bossPhase: boss.phase,
+        bossHp: boss.hp,
+        bossTelegraph: boss.telegraphActive,
         playerX,
         controlTelemetry: {
           touchSteerActive,
@@ -2052,6 +2274,15 @@ function createAmpInvadersStage(): StageRuntime {
       enemies.forEach((enemy) => {
         enemy.alive = false;
       });
+    },
+    forceBossDefeatForTest() {
+      if (!inBoss) {
+        return;
+      }
+      bossDirector.applyDamage(99_999);
+      if (bossDirector.isDefeated()) {
+        cleared = true;
+      }
     }
   };
 }
@@ -3372,8 +3603,7 @@ function advanceTriathlonForTest(): void {
     return;
   }
   if (mode === "transition") {
-    transitionRemainingMs = 0;
-    tick(0);
+    completeTransition();
     render();
     return;
   }
@@ -3393,12 +3623,22 @@ function advanceAmpWaveForTest(): void {
   render();
 }
 
+function advanceAmpBossDefeatForTest(): void {
+  if (mode !== "playing" || stage.id !== "amp-invaders") {
+    return;
+  }
+  stage.forceBossDefeatForTest?.();
+  tick(0);
+  render();
+}
+
 declare global {
   interface Window {
     render_game_to_text?: () => string;
     advanceTime?: (ms: number) => void;
     advanceTriathlonForTest?: () => void;
     advanceAmpWaveForTest?: () => void;
+    advanceAmpBossDefeatForTest?: () => void;
   }
 }
 
@@ -3406,6 +3646,7 @@ window.render_game_to_text = renderGameToText;
 window.advanceTime = advanceTime;
 window.advanceTriathlonForTest = advanceTriathlonForTest;
 window.advanceAmpWaveForTest = advanceAmpWaveForTest;
+window.advanceAmpBossDefeatForTest = advanceAmpBossDefeatForTest;
 
 // Keep the triathlon rules module hot in runtime for consistency checks.
 computeStageOptions({ elapsedMs: 0, stageEnded: false });

@@ -1,5 +1,29 @@
 export type GenreId = "pop" | "edm" | "hiphop" | "rock";
 export type SpreadTier = 1 | 2 | 3 | 4;
+export type SpecialKind = "diveBomber" | "shieldBreaker";
+
+export type AggressionSpec = {
+  baseFireCooldownMs: number;
+  minFireCooldownMs: number;
+  burstChance: number;
+  burstCount: number;
+  bulletSpeedScale: number;
+};
+
+export type SpecialSpawnSpec = {
+  startWave: number;
+  cooldownMs: number;
+  telegraphMs: number;
+  speed: number;
+};
+
+export type BossPhaseSpec = {
+  phase: 1 | 2 | 3;
+  hpThreshold: number;
+  telegraphMs: number;
+  attackCooldownMs: number;
+  burstCount: number;
+};
 
 export type Stage3V2Config = {
   genrePath: readonly GenreId[];
@@ -17,6 +41,13 @@ export type Stage3V2Config = {
     progression: "wave-clear";
     retryResetToInitialTier: boolean;
   };
+  aggressionByWave: ReadonlyArray<AggressionSpec>;
+  specials: Record<SpecialKind, SpecialSpawnSpec>;
+  boss: {
+    entryWave: number;
+    maxHp: number;
+    phases: readonly BossPhaseSpec[];
+  };
 };
 
 export const STAGE3_V2_DEFAULT_CONFIG: Stage3V2Config = {
@@ -32,6 +63,35 @@ export const STAGE3_V2_DEFAULT_CONFIG: Stage3V2Config = {
     maxTier: 4,
     progression: "wave-clear",
     retryResetToInitialTier: true
+  },
+  aggressionByWave: [
+    { baseFireCooldownMs: 900, minFireCooldownMs: 500, burstChance: 0.05, burstCount: 1, bulletSpeedScale: 1 },
+    { baseFireCooldownMs: 760, minFireCooldownMs: 440, burstChance: 0.12, burstCount: 2, bulletSpeedScale: 1.1 },
+    { baseFireCooldownMs: 640, minFireCooldownMs: 380, burstChance: 0.2, burstCount: 3, bulletSpeedScale: 1.18 },
+    { baseFireCooldownMs: 520, minFireCooldownMs: 320, burstChance: 0.28, burstCount: 3, bulletSpeedScale: 1.26 }
+  ],
+  specials: {
+    diveBomber: {
+      startWave: 3,
+      cooldownMs: 11_000,
+      telegraphMs: 700,
+      speed: 410
+    },
+    shieldBreaker: {
+      startWave: 4,
+      cooldownMs: 13_000,
+      telegraphMs: 820,
+      speed: 330
+    }
+  },
+  boss: {
+    entryWave: 4,
+    maxHp: 220,
+    phases: [
+      { phase: 1, hpThreshold: 0.7, telegraphMs: 850, attackCooldownMs: 1500, burstCount: 2 },
+      { phase: 2, hpThreshold: 0.35, telegraphMs: 720, attackCooldownMs: 1220, burstCount: 3 },
+      { phase: 3, hpThreshold: 0, telegraphMs: 620, attackCooldownMs: 980, burstCount: 4 }
+    ]
   }
 };
 
@@ -66,4 +126,22 @@ export function getWaveSpec(
   const patterns = config.wavePatterns;
   const index = ((Math.max(1, Math.floor(wave)) - 1) % patterns.length) as number;
   return patterns[index] ?? patterns[0];
+}
+
+export function getAggressionSpec(config: Stage3V2Config, wave: number): AggressionSpec {
+  const specs = config.aggressionByWave;
+  const clampedWave = Math.max(1, Math.floor(wave));
+  return specs[Math.min(specs.length - 1, clampedWave - 1)] ?? specs[0];
+}
+
+export function getSpecialSpawnSpec(config: Stage3V2Config, kind: SpecialKind): SpecialSpawnSpec {
+  return config.specials[kind];
+}
+
+export function getBossPhaseSpec(config: Stage3V2Config, phase: 1 | 2 | 3): BossPhaseSpec {
+  const item = config.boss.phases.find((spec) => spec.phase === phase);
+  if (!item) {
+    return config.boss.phases[config.boss.phases.length - 1] as BossPhaseSpec;
+  }
+  return item;
 }

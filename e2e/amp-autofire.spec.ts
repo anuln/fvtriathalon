@@ -77,6 +77,142 @@ test("amp invaders upgrades spread tier after a wave clear", async ({ page }) =>
   expect(state.stageState?.nextUpgradeWave).toBe(3);
 });
 
+test("amp invaders enemy fire pressure increases in later waves", async ({ page }) => {
+  await page.goto("http://127.0.0.1:4173/");
+  await page.getByTestId("start").click();
+
+  await page.evaluate(() => {
+    const advance = (window as Window & { advanceTriathlonForTest?: () => void }).advanceTriathlonForTest;
+    advance?.();
+    advance?.();
+  });
+
+  await page.evaluate(() => {
+    (window as Window & { advanceTime?: (ms: number) => void }).advanceTime?.(2500);
+  });
+
+  const early = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    const parsed = JSON.parse(json) as { stageState?: { totalEnemyShotsFired?: number } };
+    return parsed.stageState?.totalEnemyShotsFired ?? 0;
+  });
+
+  await page.evaluate(() => {
+    const stepWave = (window as Window & { advanceAmpWaveForTest?: () => void }).advanceAmpWaveForTest;
+    stepWave?.();
+    stepWave?.();
+  });
+
+  const preLate = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    const parsed = JSON.parse(json) as { stageState?: { totalEnemyShotsFired?: number } };
+    return parsed.stageState?.totalEnemyShotsFired ?? 0;
+  });
+
+  await page.evaluate(() => {
+    (window as Window & { advanceTime?: (ms: number) => void }).advanceTime?.(2500);
+  });
+
+  const postLate = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    const parsed = JSON.parse(json) as { stageState?: { totalEnemyShotsFired?: number } };
+    return parsed.stageState?.totalEnemyShotsFired ?? 0;
+  });
+
+  const lateDelta = postLate - preLate;
+  expect(lateDelta).toBeGreaterThan(early);
+});
+
+test("amp invaders spawns special fly-down threats in waves 3 and 4", async ({ page }) => {
+  await page.goto("http://127.0.0.1:4173/");
+  await page.getByTestId("start").click();
+
+  await page.evaluate(() => {
+    const advance = (window as Window & { advanceTriathlonForTest?: () => void }).advanceTriathlonForTest;
+    advance?.();
+    advance?.();
+  });
+
+  await page.evaluate(() => {
+    const stepWave = (window as Window & { advanceAmpWaveForTest?: () => void }).advanceAmpWaveForTest;
+    stepWave?.();
+    stepWave?.();
+  });
+
+  await page.evaluate(() => {
+    (window as Window & { advanceTime?: (ms: number) => void }).advanceTime?.(12_500);
+  });
+
+  const wave3 = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    const parsed = JSON.parse(json) as {
+      stageState?: { totalSpecialSpawns?: number; lastSpecialKind?: string; activeSpecialCount?: number };
+    };
+    return parsed.stageState;
+  });
+
+  expect(wave3?.totalSpecialSpawns ?? 0).toBeGreaterThan(0);
+  expect(wave3?.lastSpecialKind).toBe("diveBomber");
+  expect(wave3?.activeSpecialCount ?? 0).toBeGreaterThan(0);
+
+  await page.evaluate(() => {
+    const stepWave = (window as Window & { advanceAmpWaveForTest?: () => void }).advanceAmpWaveForTest;
+    stepWave?.();
+  });
+
+  await page.evaluate(() => {
+    (window as Window & { advanceTime?: (ms: number) => void }).advanceTime?.(14_500);
+  });
+
+  const wave4 = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    const parsed = JSON.parse(json) as { stageState?: { lastSpecialKind?: string } };
+    return parsed.stageState;
+  });
+
+  expect(wave4?.lastSpecialKind).toBe("shieldBreaker");
+});
+
+test("amp invaders enters boss after wave 4 and beating boss ends stage 3", async ({ page }) => {
+  await page.goto("http://127.0.0.1:4173/");
+  await page.getByTestId("start").click();
+
+  await page.evaluate(() => {
+    const advance = (window as Window & { advanceTriathlonForTest?: () => void }).advanceTriathlonForTest;
+    advance?.();
+    advance?.();
+  });
+
+  await page.evaluate(() => {
+    const stepWave = (window as Window & { advanceAmpWaveForTest?: () => void }).advanceAmpWaveForTest;
+    stepWave?.();
+    stepWave?.();
+    stepWave?.();
+    stepWave?.();
+  });
+
+  const bossState = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    const parsed = JSON.parse(json) as { mode?: string; stageState?: { bossActive?: boolean; bossPhase?: number } };
+    return parsed;
+  });
+
+  expect(bossState.mode).toBe("playing");
+  expect(bossState.stageState?.bossActive).toBe(true);
+  expect(bossState.stageState?.bossPhase).toBe(1);
+
+  await page.evaluate(() => {
+    (window as Window & { advanceAmpBossDefeatForTest?: () => void }).advanceAmpBossDefeatForTest?.();
+  });
+
+  const resolved = await page.evaluate(() => {
+    const json = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? "{}";
+    return JSON.parse(json) as { mode?: string };
+  });
+
+  expect(resolved.mode).toBe("results");
+});
+
 test("amp invaders does not collapse enemy block into instant stage loss on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("http://127.0.0.1:4173/");
