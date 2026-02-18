@@ -473,6 +473,7 @@ function syncOverlay(): void {
     overlay.innerHTML = markup;
     lastOverlayMarkup = markup;
   }
+  overlay.classList.toggle("is-interactive", markup.trim().length > 0);
 }
 
 function syncAdminPanel(): void {
@@ -2498,6 +2499,9 @@ function injectStyles(): void {
       inset: 0;
       display: grid;
       place-items: center;
+      pointer-events: none;
+    }
+    .overlay.is-interactive {
       pointer-events: auto;
     }
     .card {

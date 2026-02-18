@@ -183,3 +183,19 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
   - `npm run lint`: pass
   - `npm run build`: pass
   - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-controls.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (9 passed)
+
+- Mobile emulation deep-dive (user-reported swipe still broken):
+  - Added mobile hit-target regression: `e2e/mobile-hit-target.spec.ts`.
+  - Reproduced real issue: after START, `document.elementFromPoint(...)` in playfield returned `#overlay` instead of `#game-canvas`.
+  - Root-cause: overlay container remained pointer-interactive even when empty, intercepting real touch input on top of the canvas.
+  - Fix in `src/main.ts`:
+    - overlay now defaults to `pointer-events: none`.
+    - added `.overlay.is-interactive { pointer-events: auto; }`.
+    - `syncOverlay()` now toggles `is-interactive` only when overlay markup is non-empty.
+  - Result: gameplay touches reach canvas on mobile; swipe logic is now reachable.
+- Verification (fresh):
+  - `npm run test`: pass
+  - `npm run lint`: pass
+  - `npm run build`: pass
+  - `npm run test:e2e -- e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts`: pass
+  - `npm run test:e2e -- e2e/mobile-smoke.spec.ts e2e/mobile-hit-target.spec.ts e2e/mobile-controls.spec.ts e2e/triathlon-flow.spec.ts e2e/amp-autofire.spec.ts`: pass (10 passed)
