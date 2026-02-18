@@ -113,11 +113,11 @@ const THEME_CYCLE_INDEX_KEY = "festiverse.theme.cycle.index";
 const FORCE_GUITAR_SOLO_POWER = new URLSearchParams(window.location.search).get("forceGuitarSoloPower") === "1";
 const GUITAR_SOLO_SFX_URL = new URL("../assets/audio/lyria2/oneshot_guitar_solo.wav", import.meta.url).href;
 const GUITAR_SOLO_SPRITE_URL = new URL("../assets/sprites/rhythm-serpent-guitar-solo.png", import.meta.url).href;
-const AMP_WAVE1_ENEMY_BASELINE_URL = new URL("../assets/sprites/generated/wave1_enemy_test.png", import.meta.url).href;
-const AMP_WAVE1_ENEMY_VARIANT2_URL = new URL("../assets/sprites/generated/wave1_enemy_variant2_test.png", import.meta.url).href;
-const AMP_WAVE1_ENEMY_VARIANT3_URL = new URL("../assets/sprites/generated/wave1_enemy_variant3_test.png", import.meta.url).href;
-const AMP_WAVE1_ENEMY_VARIANT4_URL = new URL("../assets/sprites/generated/wave1_enemy_variant4_test.png", import.meta.url).href;
-const AMP_WAVE1_BULLET_URL = new URL("../assets/sprites/generated/wave1_bullet_test.png", import.meta.url).href;
+const AMP_WAVE1_ENEMY_BASELINE_URL = new URL("../assets/sprites/generated/wave1_enemy_test-transparent.png", import.meta.url).href;
+const AMP_WAVE1_ENEMY_VARIANT2_URL = new URL("../assets/sprites/generated/wave1_enemy_variant2_test-transparent.png", import.meta.url).href;
+const AMP_WAVE1_ENEMY_VARIANT3_URL = new URL("../assets/sprites/generated/wave1_enemy_variant3_test-transparent.png", import.meta.url).href;
+const AMP_WAVE1_ENEMY_VARIANT4_URL = new URL("../assets/sprites/generated/wave1_enemy_variant4_test-transparent.png", import.meta.url).href;
+const AMP_WAVE1_BULLET_URL = new URL("../assets/sprites/generated/wave1_bullet_test-transparent.png", import.meta.url).href;
 
 function must<T>(value: T | null | undefined, message: string): T {
   if (value === null || value === undefined) {
@@ -2467,11 +2467,11 @@ function createAmpInvadersStage(): StageRuntime {
       }
 
       const canDrawWave1BulletSprite =
-        wave === 1 && ampWave1BulletImage.complete && ampWave1BulletImage.naturalWidth > 0 && ampWave1BulletImage.naturalHeight > 0;
+        ampWave1BulletImage.complete && ampWave1BulletImage.naturalWidth > 0 && ampWave1BulletImage.naturalHeight > 0;
       bullets.forEach((bullet) => {
         if (canDrawWave1BulletSprite) {
-          const spriteHeight = bullet.enemy ? 18 : 20;
-          const spriteWidth = bullet.enemy ? 11 : 12;
+          const spriteHeight = bullet.enemy ? 22 : 26;
+          const spriteWidth = bullet.enemy ? 13 : 16;
           context.drawImage(
             ampWave1BulletImage,
             bullet.x - spriteWidth / 2,
