@@ -271,6 +271,7 @@ let scoreSubmitPending = false;
 let scoreSubmitError = "";
 let leaderboardLoading = false;
 let leaderboardSyncError = "";
+let leaderboardReturnMode: Exclude<Mode, "leaderboard"> = mode;
 let frameWidth = 960;
 let frameHeight = 540;
 let lastOverlayMarkup = "";
@@ -409,9 +410,9 @@ overlay.addEventListener("click", (event) => {
   } else if (action === "submit-score") {
     void submitCurrentRunScore();
   } else if (action === "open-leaderboard") {
-    void openLeaderboardScreen();
+    void openLeaderboardScreen(mode);
   } else if (action === "back-to-results") {
-    mode = "results";
+    mode = leaderboardReturnMode;
   } else if (action === "open-admin") {
     toggleAdminPanel(true);
   }
@@ -689,13 +690,15 @@ function syncOverlay(): void {
         <h1>PLAY ON MOBILE</h1>
         <p>Festiverse Arcade Triathlon is tuned for touch and phone audio.</p>
         <div class="desktop-gate-basics">
-          <span>${getStageIcon(0)} Stage 1</span>
-          <span>${getStageIcon(1)} Stage 2</span>
-          <span>${getStageIcon(2)} Stage 3</span>
-          <span>${getTotalScoreIcon()} Total</span>
+          <span>${getStageIcon(0)} Rhythm Serpent</span>
+          <span>${getStageIcon(1)} Mosh Pit Pac-Man</span>
+          <span>${getStageIcon(2)} Amp Invaders</span>
         </div>
         <img class="desktop-gate-qr" src="${DESKTOP_GATE_QR_URL}" alt="QR code to open Festiverse Arcade Triathlon on mobile" />
-        <a class="btn primary desktop-gate-link" href="${MOBILE_PLAY_URL}" target="_blank" rel="noreferrer">OPEN ON YOUR PHONE</a>
+        <div class="row desktop-gate-actions">
+          <a class="btn primary desktop-gate-link" href="${MOBILE_PLAY_URL}" target="_blank" rel="noreferrer">OPEN ON YOUR PHONE</a>
+          <button class="btn secondary" data-action="open-leaderboard">VIEW GLOBAL LEADERBOARD</button>
+        </div>
         <p class="desktop-gate-url">${MOBILE_PLAY_URL}</p>
         ${showDevHint ? `<small class="muted">Desktop dev bypass: ?${DESKTOP_GATE_BYPASS_PARAM}=1</small>` : ""}
       </div>
@@ -802,6 +805,7 @@ function syncOverlay(): void {
       </div>
     `;
   } else if (mode === "leaderboard") {
+    const showPendingHint = leaderboardReturnMode === "results" && !submittedScore;
     const highlightInitials = sanitizeInitials(lastSubmittedInitials || initialsDraft);
     const rows = topScores()
       .map((entry, index) => {
@@ -825,7 +829,7 @@ function syncOverlay(): void {
         <h2>${leaderboardCopy.title}</h2>
         ${leaderboardLoading ? `<p class="muted">${leaderboardCopy.loading}</p>` : ""}
         ${leaderboardSyncError ? `<p class="error">${leaderboardSyncError}</p>` : ""}
-        ${submittedScore ? "" : `<p class="muted">${leaderboardCopy.pendingSubmitHint}</p>`}
+        ${showPendingHint ? `<p class="muted">${leaderboardCopy.pendingSubmitHint}</p>` : ""}
         <div class="leaderboard-head">
           <span>TAG</span>
           <span>${getStageIcon(0)} ${getStageIcon(1)} ${getStageIcon(2)}</span>
@@ -1010,7 +1014,8 @@ async function submitCurrentRunScore(): Promise<void> {
   lastSubmittedInitials = initials;
 }
 
-async function openLeaderboardScreen(): Promise<void> {
+async function openLeaderboardScreen(returnMode: Mode): Promise<void> {
+  leaderboardReturnMode = returnMode === "leaderboard" ? "results" : returnMode;
   mode = "leaderboard";
   leaderboardLoading = true;
   leaderboardSyncError = "";
@@ -3925,10 +3930,10 @@ function injectStyles(): void {
       width: min(92vw, 560px);
     }
     .desktop-gate-basics {
-      width: min(100%, 340px);
+      width: min(100%, 440px);
       margin: 0 auto;
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
     }
     .desktop-gate-basics span {
@@ -3953,6 +3958,14 @@ function injectStyles(): void {
       text-decoration: none;
       justify-self: center;
       min-width: 220px;
+    }
+    .desktop-gate-actions {
+      margin-top: 2px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
     }
     .desktop-gate-url {
       margin: 0;
@@ -4487,6 +4500,10 @@ function injectStyles(): void {
       }
       .lb-scores {
         gap: 4px;
+      }
+      .desktop-gate-basics {
+        grid-template-columns: 1fr;
+        width: min(100%, 280px);
       }
       .btn {
         min-width: 114px;
