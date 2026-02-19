@@ -24,32 +24,61 @@ function installStorage(seed: Record<string, string> = {}): StorageLike {
 
 beforeEach(() => {
   vi.resetModules();
+  installStorage();
 });
 
 describe("leaderboard store", () => {
-  it("hydrates scores from localStorage before reads", async () => {
+  it("hydrates from local storage and can refresh from api", async () => {
     installStorage({
       "festiverse.v1.leaderboard": JSON.stringify([
-        { player: "NEONFOX", total: 3300, splits: [1100, 1050, 1150] }
+        { player: "OLD", total: 1000, splits: [300, 300, 400] }
       ])
     });
 
-    const { topScores } = await import("../../src/leaderboard/leaderboardStore");
-    const scores = topScores();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        entries: [
+          { initials: "NEW", total: 2100, stage1: 700, stage2: 600, stage3: 800 }
+        ]
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
-    expect(scores).toHaveLength(1);
-    expect(scores[0]?.player).toBe("NEONFOX");
+    const { refreshScores, topScores } = await import("../../src/leaderboard/leaderboardStore");
+    expect(topScores()[0]?.player).toBe("OLD");
+
+    await refreshScores();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/leaderboard?limit=200", expect.any(Object));
+    expect(topScores()[0]?.player).toBe("NEW");
+    expect(topScores()[0]?.splits).toEqual([700, 600, 800]);
   });
 
-  it("sorts descending and persists after save", async () => {
-    const storage = installStorage();
-    const { saveScore, topScores } = await import("../../src/leaderboard/leaderboardStore");
+  it("submits initials/scores and updates cache", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        entry: {
+          initials: "ABC",
+          total: 4500,
+          stage1: 1200,
+          stage2: 1500,
+          stage3: 1800
+        }
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
-    saveScore({ player: "A", total: 100, splits: [30, 30, 40] });
-    saveScore({ player: "B", total: 200, splits: [50, 70, 80] });
+    const { submitScore, topScores } = await import("../../src/leaderboard/leaderboardStore");
 
-    expect(topScores()[0]?.player).toBe("B");
-    expect(topScores()[0]?.splits.length).toBe(3);
-    expect(storage.getItem("festiverse.v1.leaderboard")).toContain("\"player\":\"B\"");
+    const submitted = await submitScore({ initials: "abc", splits: [1200, 1500, 1800], total: 4500 });
+
+    expect(submitted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/leaderboard",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(topScores()[0]?.player).toBe("ABC");
   });
 });

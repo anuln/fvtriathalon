@@ -27,7 +27,10 @@ export const transitionCopy = {
 
 export const resultsCopy = {
   title: "HEADLINER SCORE",
+  initialsLabel: "TAG",
+  initialsHint: "Enter 3 initials",
   submitCta: "SUBMIT SCORE",
+  submitPendingCta: "LOCKING...",
   submittedCta: "SCORE LOCKED",
   leaderboardCta: "VIEW BOARD",
   playAgainCta: "RUN AGAIN",
@@ -39,6 +42,8 @@ export const resultsCopy = {
 export const leaderboardCopy = {
   title: "FESTIVAL BOARD",
   empty: "No scores yet. Drop the first set.",
+  loading: "Loading board...",
+  syncError: "Board sync failed. Showing cached ranks.",
   pendingSubmitHint: "Submit this run to claim rank.",
   backCta: "BACK"
 } as const;

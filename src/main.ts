@@ -22,7 +22,8 @@ import {
 } from "./domain/runFlow";
 import { computeStageOptions } from "./domain/triathlonRules";
 import { resolveRunTotalMs } from "./domain/runConfig";
-import { saveScore, topScores } from "./leaderboard/leaderboardStore";
+import { refreshScores, submitScore, topScores } from "./leaderboard/leaderboardStore";
+import { formatEmojiLine, isValidInitials, sanitizeInitials } from "./leaderboard/leaderboardFormat";
 import { getDefaultTheme, listThemes } from "./theme/themeRegistry";
 import type { ThemePack } from "./theme/themeTypes";
 import { stepAutoFire } from "./games/amp-invaders/autoFire";
@@ -108,11 +109,11 @@ type StageRuntime = {
 
 const STAGE_IDS: StageId[] = ["rhythm-serpent", "moshpit-pacman", "amp-invaders"];
 const STAGE_NAMES = ["Rhythm Serpent", "Mosh Pit Pac-Man", "Amp Invaders"];
-const STAGE_SHORT_NAMES = ["RS", "MP", "AI"];
 const RUN_TOTAL_MS = resolveRunTotalMs(window.location.search);
 const THEME_OVERRIDE_KEY = "festiverse.theme.override";
 const THEME_CYCLE_KEY = "festiverse.theme.cycle";
 const THEME_CYCLE_INDEX_KEY = "festiverse.theme.cycle.index";
+const INITIALS_STORAGE_KEY = "festiverse.v1.initials";
 const FORCE_GUITAR_SOLO_POWER = new URLSearchParams(window.location.search).get("forceGuitarSoloPower") === "1";
 const GUITAR_SOLO_SFX_URL = new URL("../assets/audio/lyria2/oneshot_guitar_solo.wav", import.meta.url).href;
 const GUITAR_SOLO_SPRITE_URL = new URL("../assets/sprites/rhythm-serpent-guitar-solo.png", import.meta.url).href;
@@ -137,6 +138,21 @@ function createOptionalImage(src: string): HTMLImageElement {
   const image = new Image();
   image.src = src;
   return image;
+}
+
+function readStoredInitials(): string {
+  if (typeof localStorage === "undefined") {
+    return "";
+  }
+  const raw = localStorage.getItem(INITIALS_STORAGE_KEY);
+  return sanitizeInitials(raw ?? "");
+}
+
+function writeStoredInitials(value: string): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  localStorage.setItem(INITIALS_STORAGE_KEY, sanitizeInitials(value));
 }
 
 const app = must(document.querySelector<HTMLDivElement>("#app"), "Missing #app container");
@@ -193,6 +209,12 @@ let transitionCommittedStageIndex = 0;
 let transitionStageRawScore = 0;
 let transitionTotalScore = 0;
 let submittedScore = false;
+let initialsDraft = readStoredInitials();
+let lastSubmittedInitials = "";
+let scoreSubmitPending = false;
+let scoreSubmitError = "";
+let leaderboardLoading = false;
+let leaderboardSyncError = "";
 let frameWidth = 960;
 let frameHeight = 540;
 let lastOverlayMarkup = "";
@@ -220,6 +242,7 @@ const moshPitGuardSpriteImages: Record<MoshPitGuardVariant, HTMLImageElement> = 
 
 const input = createInputController(canvas);
 input.setStage(STAGE_IDS[flow.currentStageIndex] ?? "rhythm-serpent");
+void refreshScores();
 
 overlay.addEventListener("pointerdown", (event) => {
   const target = event.target as HTMLElement;
@@ -273,6 +296,35 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
+overlay.addEventListener("input", (event) => {
+  const target = event.target as HTMLInputElement;
+  if (target.dataset.field !== "initials") {
+    return;
+  }
+  const next = sanitizeInitials(target.value);
+  if (target.value !== next) {
+    target.value = next;
+  }
+  if (initialsDraft !== next) {
+    initialsDraft = next;
+    writeStoredInitials(initialsDraft);
+  }
+  if (scoreSubmitError) {
+    scoreSubmitError = "";
+  }
+});
+
+overlay.addEventListener("keydown", (event) => {
+  const target = event.target as HTMLInputElement;
+  if (target.dataset.field !== "initials") {
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void submitCurrentRunScore();
+  }
+});
+
 overlay.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
   const actionNode = target.closest<HTMLElement>("[data-action]");
@@ -293,10 +345,15 @@ overlay.addEventListener("click", (event) => {
     mode = "boot";
     runActive = false;
     submittedScore = false;
+    lastSubmittedInitials = "";
+    scoreSubmitPending = false;
+    scoreSubmitError = "";
+    leaderboardLoading = false;
+    leaderboardSyncError = "";
   } else if (action === "submit-score") {
-    submitCurrentRunScore();
+    void submitCurrentRunScore();
   } else if (action === "open-leaderboard") {
-    mode = "leaderboard";
+    void openLeaderboardScreen();
   } else if (action === "back-to-results") {
     mode = "results";
   } else if (action === "open-admin") {
@@ -517,6 +574,13 @@ function syncOverlay(): void {
     `;
   } else if (mode === "results") {
     const summary = finalScoreSummary();
+    const initials = sanitizeInitials(initialsDraft);
+    const showSubmitAsPrimary = !submittedScore;
+    const submitCta = scoreSubmitPending
+      ? resultsCopy.submitPendingCta
+      : submittedScore
+      ? resultsCopy.submittedCta
+      : resultsCopy.submitCta;
     const splits = flow.bankedTri
       .map(
         (value, idx) =>
@@ -533,27 +597,51 @@ function syncOverlay(): void {
           <p><span>${resultsCopy.finalLabel}</span><strong>${summary.totalScore}</strong></p>
         </div>
         <ul class="split-list">${splits}</ul>
-        <div class="row">
-          <button class="btn primary" data-action="submit-score">${submittedScore ? resultsCopy.submittedCta : resultsCopy.submitCta}</button>
-          <button class="btn secondary" data-action="open-leaderboard">${resultsCopy.leaderboardCta}</button>
-          <button class="btn secondary" data-action="play-again">${resultsCopy.playAgainCta}</button>
+        <label class="initials-entry">
+          <span>${resultsCopy.initialsLabel}</span>
+          <input
+            data-field="initials"
+            data-testid="initials-input"
+            maxlength="3"
+            inputmode="latin"
+            autocapitalize="characters"
+            autocomplete="off"
+            spellcheck="false"
+            value="${initials}"
+            placeholder="AAA"
+          />
+          <small>${resultsCopy.initialsHint}</small>
+        </label>
+        ${scoreSubmitError ? `<p class="error">${scoreSubmitError}</p>` : ""}
+        <div class="row results-actions">
+          <button
+            class="btn ${showSubmitAsPrimary ? "primary" : "secondary"} ${submittedScore ? "is-locked" : ""} ${scoreSubmitPending ? "is-busy" : ""}"
+            data-action="submit-score"
+            ${scoreSubmitPending || submittedScore ? "disabled" : ""}
+          >${submitCta}</button>
+          <button
+            class="btn ${showSubmitAsPrimary ? "secondary" : "primary"}"
+            data-action="open-leaderboard"
+            ${scoreSubmitPending ? "disabled" : ""}
+          >${resultsCopy.leaderboardCta}</button>
+          <button class="btn tertiary" data-action="play-again" ${scoreSubmitPending ? "disabled" : ""}>${resultsCopy.playAgainCta}</button>
         </div>
       </div>
     `;
   } else if (mode === "leaderboard") {
+    const highlightInitials = sanitizeInitials(lastSubmittedInitials || initialsDraft);
     const rows = topScores()
       .map((entry, index) => {
-        const splitA = Math.round(entry.splits[0] ?? 0);
-        const splitB = Math.round(entry.splits[1] ?? 0);
-        const splitC = Math.round(entry.splits[2] ?? 0);
+        const line = formatEmojiLine({
+          rank: index + 1,
+          initials: entry.player,
+          splits: entry.splits,
+          total: entry.total
+        });
+        const isYou = highlightInitials.length === 3 && entry.player === highlightInitials;
         return `
-          <li class="leaderboard-row ${entry.player === "YOU" ? "is-you" : ""}">
-            <div class="leaderboard-head">
-              <span>#${index + 1}</span>
-              <strong>${entry.player}</strong>
-              <strong>${entry.total}</strong>
-            </div>
-            <small>${STAGE_SHORT_NAMES[0]} ${splitA} · ${STAGE_SHORT_NAMES[1]} ${splitB} · ${STAGE_SHORT_NAMES[2]} ${splitC}</small>
+          <li class="leaderboard-row ${isYou ? "is-you" : ""}">
+            <span>${line}</span>
           </li>
         `;
       })
@@ -561,10 +649,12 @@ function syncOverlay(): void {
     markup = `
       <div class="card results">
         <h2>${leaderboardCopy.title}</h2>
+        ${leaderboardLoading ? `<p class="muted">${leaderboardCopy.loading}</p>` : ""}
+        ${leaderboardSyncError ? `<p class="error">${leaderboardSyncError}</p>` : ""}
         ${submittedScore ? "" : `<p class="muted">${leaderboardCopy.pendingSubmitHint}</p>`}
         <ol class="leaderboard-list">${rows || `<li>${leaderboardCopy.empty}</li>`}</ol>
         <div class="row">
-          <button class="btn secondary" data-action="back-to-results">${leaderboardCopy.backCta}</button>
+          <button class="btn tertiary" data-action="back-to-results">${leaderboardCopy.backCta}</button>
         </div>
       </div>
     `;
@@ -621,6 +711,11 @@ function startRun(): void {
   stageAttemptStartMs = 0;
   runActive = true;
   submittedScore = false;
+  lastSubmittedInitials = "";
+  scoreSubmitPending = false;
+  scoreSubmitError = "";
+  leaderboardLoading = false;
+  leaderboardSyncError = "";
   startStage(flow.currentStageIndex);
   mode = "playing";
 }
@@ -703,19 +798,47 @@ function finalScoreSummary(): { baseScore: number; timeBonus: number; totalScore
   return computeFinalScore(flow.bankedTri, runMsLeft());
 }
 
-function submitCurrentRunScore(): void {
-  if (submittedScore) {
+async function submitCurrentRunScore(): Promise<void> {
+  if (submittedScore || scoreSubmitPending) {
+    return;
+  }
+  const initials = sanitizeInitials(initialsDraft);
+  if (!isValidInitials(initials)) {
+    scoreSubmitError = resultsCopy.initialsHint;
     return;
   }
   const summary = finalScoreSummary();
   const splits = [...flow.bankedTri];
-  saveScore({
-    player: "YOU",
+  scoreSubmitPending = true;
+  scoreSubmitError = "";
+  writeStoredInitials(initials);
+  const submitted = await submitScore({
+    initials,
     total: summary.totalScore,
     splits
   });
+  scoreSubmitPending = false;
+  if (!submitted) {
+    scoreSubmitError = "Submit failed. Try again.";
+    return;
+  }
   audio.trigger("submit");
   submittedScore = true;
+  initialsDraft = initials;
+  lastSubmittedInitials = initials;
+}
+
+async function openLeaderboardScreen(): Promise<void> {
+  mode = "leaderboard";
+  leaderboardLoading = true;
+  leaderboardSyncError = "";
+  try {
+    await refreshScores();
+  } catch {
+    leaderboardSyncError = leaderboardCopy.syncError;
+  } finally {
+    leaderboardLoading = false;
+  }
 }
 
 function createStage(index: number): StageRuntime {
@@ -3486,6 +3609,10 @@ function injectStyles(): void {
       gap: 8px;
       margin-top: 12px;
     }
+    .results-actions {
+      margin-top: 14px;
+      gap: 10px;
+    }
     .btn {
       border: 1px solid rgba(255, 255, 255, 0.25);
       background: #66179D;
@@ -3499,23 +3626,55 @@ function injectStyles(): void {
       letter-spacing: 0.05em;
       cursor: pointer;
       text-transform: uppercase;
-      transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background-color 120ms ease;
+      transition:
+        transform 120ms ease,
+        box-shadow 120ms ease,
+        border-color 120ms ease,
+        background-color 120ms ease,
+        opacity 120ms ease,
+        filter 120ms ease;
     }
     .btn.primary {
       background: #66179D;
-      border-color: #a36bc8;
-      box-shadow: 0 0 16px rgba(102, 23, 157, 0.45);
+      border-color: #d19ff0;
+      box-shadow: 0 0 18px rgba(102, 23, 157, 0.58), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
     }
     .btn.secondary {
-      background: #66179D;
+      background: linear-gradient(180deg, rgba(102, 23, 157, 0.82), rgba(58, 16, 90, 0.92));
+      border-color: rgba(209, 159, 240, 0.62);
+      box-shadow: 0 0 10px rgba(102, 23, 157, 0.26);
+    }
+    .btn.tertiary {
+      background: rgba(102, 23, 157, 0.32);
+      border-color: rgba(209, 159, 240, 0.36);
+      color: rgba(243, 244, 246, 0.88);
+      box-shadow: none;
+    }
+    .btn.is-locked {
+      cursor: default;
+      filter: saturate(0.6);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    }
+    .btn.is-busy {
+      position: relative;
+      border-color: #e1b8f8;
+      box-shadow: 0 0 22px rgba(102, 23, 157, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+    }
+    .btn:disabled {
+      opacity: 0.82;
+      transform: none;
+    }
+    .btn:disabled:not(.is-locked) {
+      cursor: progress;
     }
     .btn:hover {
       transform: translateY(-1px);
       border-color: rgba(255, 255, 255, 0.58);
-      background: #7722b2;
+      background: #7526ac;
     }
     .btn:active {
       transform: translateY(0);
+      box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.28);
     }
     .btn:focus-visible {
       outline: 2px solid color-mix(in srgb, var(--primary) 74%, white 26%);
@@ -3586,29 +3745,77 @@ function injectStyles(): void {
       color: var(--primary);
       font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
     }
+    .initials-entry {
+      margin: 12px auto 0;
+      width: min(100%, 240px);
+      display: grid;
+      gap: 6px;
+      text-align: left;
+    }
+    .initials-entry > span {
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.86;
+    }
+    .initials-entry input {
+      height: 42px;
+      border-radius: 10px;
+      border: 1px solid rgba(209, 159, 240, 0.58);
+      background: rgba(9, 10, 22, 0.88);
+      color: #f4f2fb;
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 0.26em;
+      font-size: 20px;
+      font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
+    }
+    .initials-entry input:focus-visible {
+      outline: 2px solid rgba(209, 159, 240, 0.8);
+      outline-offset: 2px;
+    }
+    .initials-entry small {
+      margin: 0;
+      opacity: 0.7;
+      font-size: 11px;
+    }
+    .error {
+      margin: 8px 0 0;
+      color: #ff97be;
+      font-size: 12px;
+      letter-spacing: 0.02em;
+    }
     .leaderboard-list {
       list-style: none;
       padding: 0;
       margin: 10px 0 0;
       text-align: left;
+      max-height: min(42vh, 320px);
+      overflow: auto;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 10px;
+      background: rgba(7, 8, 18, 0.42);
     }
     .leaderboard-row {
-      padding: 8px 10px;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 10px;
-      margin-bottom: 8px;
-      background: rgba(6, 8, 20, 0.55);
+      padding: 7px 10px;
+      margin: 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      font-size: 12px;
+      font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .leaderboard-row.is-you {
-      border-color: color-mix(in srgb, var(--primary) 55%, white 6%);
-      box-shadow: 0 0 16px rgba(0, 229, 255, 0.12);
+      background: rgba(23, 43, 70, 0.52);
+      box-shadow: inset 3px 0 0 rgba(0, 229, 255, 0.7);
     }
-    .leaderboard-head {
-      display: grid;
-      grid-template-columns: auto 1fr auto;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 3px;
+    .leaderboard-row:last-child {
+      border-bottom: 0;
+    }
+    .leaderboard-row.is-you span {
+      color: #8ff7ff;
     }
     .attract .title-stack {
       display: grid;
