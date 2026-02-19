@@ -1,7 +1,7 @@
 import { computeFinalScore, computeStageScore } from "./domain/scoring";
 import { getStageBeatPulse } from "./domain/beatPulse";
 import { computeRhythmSerpentGrid } from "./domain/rhythmSerpentLayout";
-import { getStageIcon } from "./domain/stageIcons";
+import { getStageIcon, getTotalScoreIcon } from "./domain/stageIcons";
 import {
   classifyTouchGesture,
   getMobileInputProfile,
@@ -24,7 +24,7 @@ import {
 import { computeStageOptions } from "./domain/triathlonRules";
 import { resolveRunTotalMs } from "./domain/runConfig";
 import { refreshScores, submitScore, topScores } from "./leaderboard/leaderboardStore";
-import { formatEmojiLine, isValidInitials, sanitizeInitials } from "./leaderboard/leaderboardFormat";
+import { formatCompactScore, isValidInitials, sanitizeInitials } from "./leaderboard/leaderboardFormat";
 import { getDefaultTheme, listThemes } from "./theme/themeRegistry";
 import type { ThemePack } from "./theme/themeTypes";
 import { stepAutoFire } from "./games/amp-invaders/autoFire";
@@ -47,6 +47,7 @@ import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specia
 import { shouldEnterBossOnWaveClear } from "./games/amp-invaders/stageFlow";
 import { pickWave1EnemyVariant, type Wave1EnemyVariant } from "./games/amp-invaders/wave1SpriteRoster";
 import { getActiveMoshers, getStage2Pacing } from "./games/moshpit-pacman/moshPitEscalation";
+import { formatMoshPitLifeHeart } from "./games/moshpit-pacman/lifeHud";
 import { getMosherGuardVariant, type MoshPitGuardVariant } from "./games/moshpit-pacman/moshPitSpriteRoster";
 import { ZONE_LEVEL_STEP, computeZoneCompletionBonus, zonesReadyForRespawn } from "./games/moshpit-pacman/zoneCycle";
 import { createZoneMusicState, updateZoneMusicState } from "./games/moshpit-pacman/zoneMusicState";
@@ -467,6 +468,22 @@ function readAmpInvadersLives(activeStage: StageRuntime): number | null {
   return Math.max(0, Math.round(livesRaw));
 }
 
+function readMoshPitCrowdSaveLives(activeStage: StageRuntime): number | null {
+  if (activeStage.id !== "moshpit-pacman") {
+    return null;
+  }
+  const debug = activeStage.debugState();
+  if (!debug || typeof debug !== "object") {
+    return null;
+  }
+  const payload = debug as Record<string, unknown>;
+  const chargesRaw = payload.crowdSaveCharges;
+  if (typeof chargesRaw !== "number" || !Number.isFinite(chargesRaw)) {
+    return null;
+  }
+  return Math.max(0, Math.round(chargesRaw));
+}
+
 function parseSnakeAudioState(value: unknown): SnakeAudioState | null {
   if (
     value === "intro" ||
@@ -588,10 +605,15 @@ function syncHud(): void {
   const compactHud = frameWidth <= 520;
   const summary = finalScoreSummary();
   const graceActive = mode === "playing" && (stage.isGraceActive?.() ?? false);
+  const canShowMoshPitLife =
+    stage.id === "moshpit-pacman" && (mode === "playing" || mode === "deathPause" || mode === "deathChoice");
   const canShowAmpLives =
     stage.id === "amp-invaders" && (mode === "playing" || mode === "deathPause" || mode === "deathChoice");
+  const moshPitLife = canShowMoshPitLife ? readMoshPitCrowdSaveLives(stage) : null;
+  const moshPitLifeText = moshPitLife === null ? "" : formatMoshPitLifeHeart(moshPitLife);
   const ampLives = canShowAmpLives ? readAmpInvadersLives(stage) : null;
   const ampLivesText = ampLives === null ? "" : formatAmpLivesHearts(ampLives);
+  const livesText = ampLivesText || moshPitLifeText;
   hudTime.textContent = formatMs(leftMs);
   hudStage.textContent =
     mode === "results" || mode === "leaderboard"
@@ -607,8 +629,8 @@ function syncHud(): void {
       : `Stage: ${Math.round(flow.stageRaw)} • Total: ${totalBankedScore()}`;
   hudGrace.classList.toggle("hidden", !graceActive);
   hudGrace.textContent = graceActive ? "GRACE" : "";
-  hudLives.classList.toggle("hidden", ampLivesText.length === 0);
-  hudLives.textContent = ampLivesText;
+  hudLives.classList.toggle("hidden", livesText.length === 0);
+  hudLives.textContent = livesText;
 }
 
 function syncCommitButton(): void {
@@ -653,13 +675,19 @@ function syncOverlay(): void {
       </div>
     `;
   } else if (mode === "transition") {
-    const nextLabel = flow.currentStageIndex >= STAGE_NAMES.length ? "Results" : STAGE_NAMES[flow.currentStageIndex];
+    const nextIsResults = flow.currentStageIndex >= STAGE_NAMES.length;
+    const nextLabel = nextIsResults ? "Results" : STAGE_NAMES[flow.currentStageIndex];
+    const nextIcon = nextIsResults ? getTotalScoreIcon() : getStageIcon(flow.currentStageIndex);
+    const lockedIcon = getStageIcon(transitionCommittedStageIndex);
     markup = `
-      <div class="card">
+      <div class="card transition-card">
         <h2>STAGE ${transitionCommittedStageIndex + 1} LOCKED</h2>
-        <p>Banked: ${Math.round(transitionStageRawScore)}</p>
-        <p>Set Total: ${transitionTotalScore}</p>
-        <p class="muted">${transitionCopy.nextPrefix}: ${nextLabel}</p>
+        <p>${lockedIcon} Banked: ${Math.round(transitionStageRawScore)}</p>
+        <p>${getTotalScoreIcon()} Set Total: ${transitionTotalScore}</p>
+        <div class="next-stage-emphasis">
+          <span class="next-kicker">${transitionCopy.nextPrefix}</span>
+          <strong>${nextIcon} ${nextLabel}</strong>
+        </div>
         <div class="row">
           <button class="btn primary" data-action="continue-stage">${transitionCopy.cta}</button>
         </div>
@@ -682,7 +710,7 @@ function syncOverlay(): void {
     markup = `
       <div class="card results tight-results">
         <h2>${resultsCopy.title}</h2>
-        <p class="score">${summary.totalScore}</p>
+        <p class="score"><span class="score-icon">${getTotalScoreIcon()}</span>${summary.totalScore}</p>
         <p class="bonus-line"><span>${resultsCopy.timeBonusLabel}</span><strong>+${summary.timeBonus}</strong></p>
         <ul class="emoji-split-list">${emojiSplits}</ul>
         <label class="initials-entry">
@@ -718,16 +746,17 @@ function syncOverlay(): void {
     const highlightInitials = sanitizeInitials(lastSubmittedInitials || initialsDraft);
     const rows = topScores()
       .map((entry, index) => {
-        const line = formatEmojiLine({
-          rank: index + 1,
-          initials: entry.player,
-          splits: entry.splits,
-          total: entry.total
-        });
+        const [stage1 = 0, stage2 = 0, stage3 = 0] = entry.splits;
         const isYou = highlightInitials.length === 3 && entry.player === highlightInitials;
         return `
           <li class="leaderboard-row ${isYou ? "is-you" : ""}">
-            <span>${line}</span>
+            <span class="lb-cell lb-initials">${entry.player}</span>
+            <span class="lb-cell lb-scores">
+              <span class="lb-split"><span class="lb-icon">${getStageIcon(0)}</span>${formatCompactScore(stage1)}</span>
+              <span class="lb-split"><span class="lb-icon">${getStageIcon(1)}</span>${formatCompactScore(stage2)}</span>
+              <span class="lb-split"><span class="lb-icon">${getStageIcon(2)}</span>${formatCompactScore(stage3)}</span>
+            </span>
+            <strong class="lb-cell lb-total"><span class="lb-icon">${getTotalScoreIcon()}</span>${formatCompactScore(entry.total)}</strong>
           </li>
         `;
       })
@@ -738,7 +767,12 @@ function syncOverlay(): void {
         ${leaderboardLoading ? `<p class="muted">${leaderboardCopy.loading}</p>` : ""}
         ${leaderboardSyncError ? `<p class="error">${leaderboardSyncError}</p>` : ""}
         ${submittedScore ? "" : `<p class="muted">${leaderboardCopy.pendingSubmitHint}</p>`}
-        <ol class="leaderboard-list">${rows || `<li>${leaderboardCopy.empty}</li>`}</ol>
+        <div class="leaderboard-head">
+          <span>TAG</span>
+          <span>${getStageIcon(0)} ${getStageIcon(1)} ${getStageIcon(2)}</span>
+          <span>${getTotalScoreIcon()} TOTAL</span>
+        </div>
+        <ol class="leaderboard-list">${rows || `<li class="leaderboard-empty">${leaderboardCopy.empty}</li>`}</ol>
         <div class="row">
           <button class="btn tertiary" data-action="back-to-results">${leaderboardCopy.backCta}</button>
         </div>
@@ -3807,6 +3841,34 @@ function injectStyles(): void {
       gap: 10px;
       padding: 26px 24px 22px;
     }
+    .transition-card {
+      display: grid;
+      gap: 10px;
+    }
+    .next-stage-emphasis {
+      margin: 2px auto 0;
+      width: min(100%, 320px);
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      background: linear-gradient(180deg, rgba(102, 23, 157, 0.28), rgba(16, 18, 36, 0.62));
+      padding: 10px 12px;
+      display: grid;
+      gap: 2px;
+      box-shadow: 0 0 20px rgba(102, 23, 157, 0.25);
+    }
+    .next-kicker {
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      opacity: 0.8;
+    }
+    .next-stage-emphasis strong {
+      font-size: 24px;
+      line-height: 1.05;
+      letter-spacing: 0.04em;
+      color: #c1f7ff;
+      text-shadow: 0 0 16px rgba(108, 226, 255, 0.5);
+    }
     .card.compact {
       width: min(78vw, 420px);
     }
@@ -3826,6 +3888,14 @@ function injectStyles(): void {
       font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
       font-weight: 800;
       color: var(--primary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .score-icon {
+      font-size: 28px;
+      line-height: 1;
     }
     .row {
       display: flex;
@@ -3849,39 +3919,39 @@ function injectStyles(): void {
       width: min(100%, 260px);
     }
     .btn {
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      background: #66179D;
+      border: 1px solid rgba(255, 255, 255, 0.26);
+      background: linear-gradient(180deg, #6b1ba2, #551283);
       color: var(--text);
-      border-radius: 10px;
-      padding: 10px 14px;
+      border-radius: 12px;
+      padding: 10px 15px;
       min-height: 44px;
       min-width: 132px;
       font-size: 14px;
-      font-weight: 700;
+      font-weight: 800;
       letter-spacing: 0.05em;
       cursor: pointer;
       text-transform: uppercase;
       transition:
-        transform 120ms ease,
+        transform 110ms ease,
         box-shadow 120ms ease,
         border-color 120ms ease,
         background-color 120ms ease,
-        opacity 120ms ease,
-        filter 120ms ease;
+        opacity 120ms ease;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
     }
     .btn.primary {
-      background: #66179D;
-      border-color: #d19ff0;
-      box-shadow: 0 0 18px rgba(102, 23, 157, 0.58), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+      background: linear-gradient(180deg, #8028c0, #66179D);
+      border-color: rgba(230, 201, 255, 0.9);
+      box-shadow: 0 0 22px rgba(102, 23, 157, 0.58), inset 0 1px 0 rgba(255, 255, 255, 0.2);
     }
     .btn.secondary {
-      background: linear-gradient(180deg, rgba(102, 23, 157, 0.82), rgba(58, 16, 90, 0.92));
-      border-color: rgba(209, 159, 240, 0.62);
-      box-shadow: 0 0 10px rgba(102, 23, 157, 0.26);
+      background: linear-gradient(180deg, rgba(104, 34, 148, 0.88), rgba(70, 20, 108, 0.94));
+      border-color: rgba(209, 159, 240, 0.72);
+      box-shadow: 0 0 14px rgba(102, 23, 157, 0.32);
     }
     .btn.tertiary {
       background: rgba(102, 23, 157, 0.32);
-      border-color: rgba(209, 159, 240, 0.36);
+      border-color: rgba(209, 159, 240, 0.42);
       color: rgba(243, 244, 246, 0.88);
       box-shadow: none;
     }
@@ -3903,9 +3973,20 @@ function injectStyles(): void {
       cursor: progress;
     }
     .btn:hover {
-      transform: translateY(-1px);
-      border-color: rgba(255, 255, 255, 0.58);
-      background: #7526ac;
+      transform: translateY(-1px) scale(1.01);
+      border-color: rgba(255, 255, 255, 0.68);
+    }
+    .btn.primary:hover {
+      box-shadow: 0 0 26px rgba(102, 23, 157, 0.68), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+      background: linear-gradient(180deg, #8d33d0, #7020ab);
+    }
+    .btn.secondary:hover {
+      box-shadow: 0 0 18px rgba(102, 23, 157, 0.42);
+      background: linear-gradient(180deg, rgba(114, 42, 160, 0.94), rgba(76, 24, 118, 0.98));
+    }
+    .btn.tertiary:hover {
+      background: rgba(102, 23, 157, 0.44);
+      border-color: rgba(228, 189, 255, 0.58);
     }
     .btn:active {
       transform: translateY(0);
@@ -3994,16 +4075,18 @@ function injectStyles(): void {
       font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
     }
     .bonus-line {
-      margin: -2px auto 0;
-      width: fit-content;
-      max-width: 100%;
-      display: flex;
-      justify-content: center;
-      align-items: baseline;
-      gap: 8px;
+      margin: -2px 0 0;
+      width: 100%;
+      display: grid;
+      justify-items: center;
+      gap: 1px;
       font-size: 14px;
       letter-spacing: 0.04em;
       text-transform: uppercase;
+      text-align: center;
+    }
+    .bonus-line span,
+    .bonus-line strong {
       text-align: center;
     }
     .bonus-line strong {
@@ -4093,27 +4176,81 @@ function injectStyles(): void {
       font-size: 12px;
       letter-spacing: 0.02em;
     }
+    .leaderboard-head {
+      margin: 10px 0 0;
+      padding: 0 10px 6px;
+      display: grid;
+      grid-template-columns: minmax(64px, 0.8fr) minmax(0, 2fr) minmax(72px, 0.9fr);
+      column-gap: 8px;
+      text-align: center;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      opacity: 0.72;
+      font-weight: 700;
+    }
     .leaderboard-list {
       list-style: none;
       padding: 0;
-      margin: 10px 0 0;
-      text-align: left;
+      margin: 0;
+      text-align: center;
       max-height: min(42vh, 320px);
       overflow: auto;
       border: 1px solid rgba(255, 255, 255, 0.14);
       border-radius: 10px;
       background: rgba(7, 8, 18, 0.42);
     }
+    .leaderboard-empty {
+      margin: 0;
+      padding: 10px;
+      font-size: 12px;
+      text-align: center;
+      opacity: 0.78;
+    }
     .leaderboard-row {
-      padding: 7px 10px;
+      padding: 8px 10px;
       margin: 0;
       border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-      font-size: 12px;
+      display: grid;
+      grid-template-columns: minmax(64px, 0.8fr) minmax(0, 2fr) minmax(72px, 0.9fr);
+      align-items: center;
+      column-gap: 8px;
+      font-size: 11px;
       font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
       letter-spacing: 0.03em;
+    }
+    .lb-cell {
+      min-width: 0;
+    }
+    .lb-initials {
+      justify-self: center;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+    }
+    .lb-scores {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .lb-split {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
       white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    }
+    .lb-icon {
+      font-size: 12px;
+      line-height: 1;
+    }
+    .lb-total {
+      justify-self: center;
+      font-weight: 800;
+      color: var(--primary);
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
     }
     .leaderboard-row.is-you {
       background: rgba(23, 43, 70, 0.52);
@@ -4122,7 +4259,8 @@ function injectStyles(): void {
     .leaderboard-row:last-child {
       border-bottom: 0;
     }
-    .leaderboard-row.is-you span {
+    .leaderboard-row.is-you .lb-cell,
+    .leaderboard-row.is-you .lb-total {
       color: #8ff7ff;
     }
     .attract .title-stack {
@@ -4221,6 +4359,13 @@ function injectStyles(): void {
       }
       .stage-meta {
         font-size: 10px;
+      }
+      .leaderboard-head,
+      .leaderboard-row {
+        grid-template-columns: minmax(58px, 0.75fr) minmax(0, 2fr) minmax(64px, 0.85fr);
+      }
+      .lb-scores {
+        gap: 4px;
       }
       .btn {
         min-width: 114px;

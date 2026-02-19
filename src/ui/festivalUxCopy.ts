@@ -4,7 +4,7 @@ export const bootCopy = {
   strap: "3 stages. 1 timer. Chase the headline.",
   hint: "Tap in. Audio on. Crowd up.",
   startCta: "START",
-  stageLabels: ["RHYTHM SERPENT", "MOSH PIT PAC-MAN", "AMP INVADERS"] as const,
+  stageLabels: ["🐍 RHYTHM SERPENT", "👻 MOSH PIT PAC-MAN", "🚀 AMP INVADERS"] as const,
   rules: "Lock in after 60s. No rewinds."
 } as const;
 
