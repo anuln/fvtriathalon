@@ -575,28 +575,23 @@ function syncOverlay(): void {
   } else if (mode === "results") {
     const summary = finalScoreSummary();
     const initials = sanitizeInitials(initialsDraft);
-    const showSubmitAsPrimary = !submittedScore;
     const submitCta = scoreSubmitPending
       ? resultsCopy.submitPendingCta
       : submittedScore
       ? resultsCopy.submittedCta
       : resultsCopy.submitCta;
-    const splits = flow.bankedTri
-      .map(
-        (value, idx) =>
-          `<li><span>${STAGE_NAMES[idx]}</span><strong>${value}</strong></li>`
-      )
+    const emojiSplits = flow.bankedTri
+      .map((value, idx) => {
+        const emoji = idx === 0 ? "🎸" : idx === 1 ? "👾" : "🚀";
+        return `<li><span>${emoji}</span><strong>${Math.round(value)}</strong></li>`;
+      })
       .join("");
     markup = `
-      <div class="card results">
+      <div class="card results tight-results">
         <h2>${resultsCopy.title}</h2>
         <p class="score">${summary.totalScore}</p>
-        <div class="score-grid">
-          <p><span>${resultsCopy.stageTotalLabel}</span><strong>${summary.baseScore}</strong></p>
-          <p><span>${resultsCopy.timeBonusLabel}</span><strong>+${summary.timeBonus}</strong></p>
-          <p><span>${resultsCopy.finalLabel}</span><strong>${summary.totalScore}</strong></p>
-        </div>
-        <ul class="split-list">${splits}</ul>
+        <p class="bonus-line"><span>${resultsCopy.timeBonusLabel}</span><strong>+${summary.timeBonus}</strong></p>
+        <ul class="emoji-split-list">${emojiSplits}</ul>
         <label class="initials-entry">
           <span>${resultsCopy.initialsLabel}</span>
           <input
@@ -612,18 +607,16 @@ function syncOverlay(): void {
           />
           <small>${resultsCopy.initialsHint}</small>
         </label>
-        ${scoreSubmitError ? `<p class="error">${scoreSubmitError}</p>` : ""}
-        <div class="row results-actions">
+        <div class="row submit-row">
           <button
-            class="btn ${showSubmitAsPrimary ? "primary" : "secondary"} ${submittedScore ? "is-locked" : ""} ${scoreSubmitPending ? "is-busy" : ""}"
+            class="btn primary ${submittedScore ? "is-locked" : ""} ${scoreSubmitPending ? "is-busy" : ""}"
             data-action="submit-score"
             ${scoreSubmitPending || submittedScore ? "disabled" : ""}
           >${submitCta}</button>
-          <button
-            class="btn ${showSubmitAsPrimary ? "secondary" : "primary"}"
-            data-action="open-leaderboard"
-            ${scoreSubmitPending ? "disabled" : ""}
-          >${resultsCopy.leaderboardCta}</button>
+        </div>
+        ${scoreSubmitError ? `<p class="error">${scoreSubmitError}</p>` : ""}
+        <div class="row results-actions">
+          <button class="btn secondary" data-action="open-leaderboard" ${scoreSubmitPending ? "disabled" : ""}>${resultsCopy.leaderboardCta}</button>
           <button class="btn tertiary" data-action="play-again" ${scoreSubmitPending ? "disabled" : ""}>${resultsCopy.playAgainCta}</button>
         </div>
       </div>
@@ -3613,6 +3606,16 @@ function injectStyles(): void {
       margin-top: 14px;
       gap: 10px;
     }
+    .tight-results {
+      display: grid;
+      gap: 10px;
+    }
+    .submit-row {
+      margin-top: 2px;
+    }
+    .submit-row .btn {
+      width: min(100%, 260px);
+    }
     .btn {
       border: 1px solid rgba(255, 255, 255, 0.25);
       background: #66179D;
@@ -3730,6 +3733,48 @@ function injectStyles(): void {
       color: var(--primary);
       font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
     }
+    .bonus-line {
+      margin: -2px auto 0;
+      width: min(100%, 270px);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .bonus-line strong {
+      color: var(--primary);
+      font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
+      font-size: 18px;
+    }
+    .emoji-split-list {
+      list-style: none;
+      margin: 0 auto;
+      padding: 0;
+      width: min(100%, 270px);
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .emoji-split-list li {
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 10px;
+      background: rgba(10, 14, 28, 0.6);
+      padding: 8px 6px 7px;
+      display: grid;
+      justify-items: center;
+      gap: 4px;
+    }
+    .emoji-split-list span {
+      font-size: 18px;
+      line-height: 1;
+    }
+    .emoji-split-list strong {
+      color: var(--primary);
+      font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
+      font-size: 13px;
+    }
     .split-list {
       list-style: none;
       margin: 10px 0 0;
@@ -3746,7 +3791,7 @@ function injectStyles(): void {
       font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
     }
     .initials-entry {
-      margin: 12px auto 0;
+      margin: 2px auto 0;
       width: min(100%, 240px);
       display: grid;
       gap: 6px;
@@ -3780,7 +3825,7 @@ function injectStyles(): void {
       font-size: 11px;
     }
     .error {
-      margin: 8px 0 0;
+      margin: 0;
       color: #ff97be;
       font-size: 12px;
       letter-spacing: 0.02em;

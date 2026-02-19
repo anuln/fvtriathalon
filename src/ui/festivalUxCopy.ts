@@ -26,7 +26,7 @@ export const transitionCopy = {
 } as const;
 
 export const resultsCopy = {
-  title: "HEADLINER SCORE",
+  title: "HEADLINER TRIATHLON SCORE",
   initialsLabel: "TAG",
   initialsHint: "Enter 3 initials",
   submitCta: "SUBMIT SCORE",
@@ -35,7 +35,7 @@ export const resultsCopy = {
   leaderboardCta: "VIEW BOARD",
   playAgainCta: "RUN AGAIN",
   stageTotalLabel: "SET TOTAL",
-  timeBonusLabel: "TIME HYPE",
+  timeBonusLabel: "TIME HYPE BONUS",
   finalLabel: "FINAL"
 } as const;
 

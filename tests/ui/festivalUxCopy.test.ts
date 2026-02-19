@@ -24,7 +24,7 @@ describe("festival UX copy", () => {
 
   it("keeps transition and results copy in the same voice", () => {
     expect(transitionCopy.cta).toBe("DROP IN");
-    expect(resultsCopy.title).toBe("HEADLINER SCORE");
+    expect(resultsCopy.title).toBe("HEADLINER TRIATHLON SCORE");
     expect(leaderboardCopy.title).toBe("FESTIVAL BOARD");
   });
 });
