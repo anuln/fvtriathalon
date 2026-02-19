@@ -231,8 +231,8 @@ function buildStorageUnavailablePayload(error: unknown): Record<string, unknown>
 }
 
 async function sendDebugSnapshot(res: JsonResponse): Promise<void> {
-  const configured = Boolean(connectionSpec.value);
-  if (!configured) {
+  const connectionString = connectionSpec.value;
+  if (!connectionString) {
     sendJson(res, 200, {
       ok: false,
       connectionConfigured: false,
@@ -252,7 +252,7 @@ async function sendDebugSnapshot(res: JsonResponse): Promise<void> {
       ok: true,
       connectionConfigured: true,
       connectionSource: connectionSpec.source,
-      tlsMode: shouldUseSsl(connectionSpec.value) ? "sslmode=no-verify" : "ssl-disabled",
+      tlsMode: shouldUseSsl(connectionString) ? "sslmode=no-verify" : "ssl-disabled",
       schemaReady,
       pingOk: pingResult.rows[0]?.ok === 1,
       tableExists
@@ -262,7 +262,7 @@ async function sendDebugSnapshot(res: JsonResponse): Promise<void> {
       ok: false,
       connectionConfigured: true,
       connectionSource: connectionSpec.source,
-      tlsMode: shouldUseSsl(connectionSpec.value) ? "sslmode=no-verify" : "ssl-disabled",
+      tlsMode: shouldUseSsl(connectionString) ? "sslmode=no-verify" : "ssl-disabled",
       schemaReady,
       detail: errorDetail(error)
     });

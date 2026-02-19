@@ -13,6 +13,10 @@ vi.mock("pg", () => {
   let createdAtTick = 0;
   let rows: StoredRow[] = [];
 
+  function typedRows<T extends Record<string, unknown>>(value: Record<string, unknown>[]): T[] {
+    return value as unknown as T[];
+  }
+
   class Pool {
     async query<T extends Record<string, unknown>>(text: string, params: unknown[] = []): Promise<{ rows: T[] }> {
       const sql = text.toLowerCase().replace(/\s+/g, " ").trim();
@@ -23,10 +27,10 @@ vi.mock("pg", () => {
         return { rows: [] as T[] };
       }
       if (sql.includes("select to_regclass('public.leaderboard_entries') as table_name")) {
-        return { rows: [{ table_name: "leaderboard_entries" }] as T[] };
+        return { rows: typedRows<T>([{ table_name: "leaderboard_entries" }]) };
       }
       if (sql.startsWith("select 1 as ok")) {
-        return { rows: [{ ok: 1 }] as T[] };
+        return { rows: typedRows<T>([{ ok: 1 }]) };
       }
       if (sql.includes("insert into public.leaderboard_entries")) {
         const [initials, total, stage1, stage2, stage3] = params as [string, number, number, number, number];
@@ -39,7 +43,7 @@ vi.mock("pg", () => {
           created_at: new Date(Date.UTC(2026, 1, 19, 0, 0, createdAtTick++)).toISOString()
         };
         rows.push(inserted);
-        return { rows: [inserted] as T[] };
+        return { rows: typedRows<T>([inserted]) };
       }
       if (sql.includes("from public.leaderboard_entries") && sql.includes("order by total desc, created_at asc")) {
         const limit = Math.max(1, Number(params[0] ?? 200));
@@ -51,7 +55,7 @@ vi.mock("pg", () => {
             return a.created_at.localeCompare(b.created_at);
           })
           .slice(0, limit);
-        return { rows: ranked as T[] };
+        return { rows: typedRows<T>(ranked) };
       }
       throw new Error(`Unmocked SQL query in test: ${text}`);
     }
