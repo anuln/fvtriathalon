@@ -40,6 +40,8 @@ import { createEnemyDirector } from "./games/amp-invaders/enemyDirector";
 import { createBossDirector } from "./games/amp-invaders/bossDirector";
 import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specials";
 import { pickWave1EnemyVariant, type Wave1EnemyVariant } from "./games/amp-invaders/wave1SpriteRoster";
+import { getActiveMoshers, getStage2Pacing } from "./games/moshpit-pacman/moshPitEscalation";
+import { getMosherGuardVariant, type MoshPitGuardVariant } from "./games/moshpit-pacman/moshPitSpriteRoster";
 import { ZONE_LEVEL_STEP, computeZoneCompletionBonus, zonesReadyForRespawn } from "./games/moshpit-pacman/zoneCycle";
 import { createZoneMusicState, updateZoneMusicState } from "./games/moshpit-pacman/zoneMusicState";
 import {
@@ -119,6 +121,10 @@ const AMP_WAVE1_ENEMY_VARIANT2_URL = new URL("../assets/sprites/generated/wave1_
 const AMP_WAVE1_ENEMY_VARIANT3_URL = new URL("../assets/sprites/generated/wave1_enemy_variant3_test-transparent.png", import.meta.url).href;
 const AMP_WAVE1_ENEMY_VARIANT4_URL = new URL("../assets/sprites/generated/wave1_enemy_variant4_test-transparent.png", import.meta.url).href;
 const AMP_WAVE1_BULLET_URL = new URL("../assets/sprites/generated/wave1_bullet_test-transparent.png", import.meta.url).href;
+const MOSHPIT_PLAYER_RUNNER_URL = new URL("../assets/sprites/generated/moshpit_player_runner_test-transparent.png", import.meta.url).href;
+const MOSHPIT_GUARD_BOUNCER_URL = new URL("../assets/sprites/generated/moshpit_guard_bouncer_test-transparent.png", import.meta.url).href;
+const MOSHPIT_GUARD_PUNKER_URL = new URL("../assets/sprites/generated/moshpit_guard_punker_test-transparent.png", import.meta.url).href;
+const MOSHPIT_GUARD_RAVER_URL = new URL("../assets/sprites/generated/moshpit_guard_raver_test-transparent.png", import.meta.url).href;
 
 function must<T>(value: T | null | undefined, message: string): T {
   if (value === null || value === undefined) {
@@ -205,6 +211,12 @@ const ampWave1EnemyImages: Record<Wave1EnemyVariant, HTMLImageElement> = {
   variant4: createOptionalImage(AMP_WAVE1_ENEMY_VARIANT4_URL)
 };
 const ampWave1BulletImage = createOptionalImage(AMP_WAVE1_BULLET_URL);
+const moshPitPlayerSpriteImage = createOptionalImage(MOSHPIT_PLAYER_RUNNER_URL);
+const moshPitGuardSpriteImages: Record<MoshPitGuardVariant, HTMLImageElement> = {
+  bouncer: createOptionalImage(MOSHPIT_GUARD_BOUNCER_URL),
+  punker: createOptionalImage(MOSHPIT_GUARD_PUNKER_URL),
+  raver: createOptionalImage(MOSHPIT_GUARD_RAVER_URL)
+};
 
 const input = createInputController(canvas);
 input.setStage(STAGE_IDS[flow.currentStageIndex] ?? "rhythm-serpent");
@@ -1566,6 +1578,10 @@ function createMoshPitPacmanStage(): StageRuntime {
     }
   }
 
+  function activeMosherCount(): number {
+    return getActiveMoshers(totalZoneCompletions, guards.length);
+  }
+
   function optionsAt(x: number, y: number): number {
     let count = 0;
     const dirs: Dir[] = ["left", "right", "up", "down"];
@@ -1580,7 +1596,10 @@ function createMoshPitPacmanStage(): StageRuntime {
     if (crowdSaveInvulnMs > 0) {
       return;
     }
-    for (const guard of guards) {
+    const activeCount = activeMosherCount();
+    for (let i = 0; i < activeCount; i += 1) {
+      const guard = guards[i];
+      if (!guard) continue;
       if (guard.x !== player.x || guard.y !== player.y) continue;
       if (frightMs > 0) {
         guardChain += 1;
@@ -1626,8 +1645,10 @@ function createMoshPitPacmanStage(): StageRuntime {
       zoneCompletionFlashMs = Math.max(0, zoneCompletionFlashMs - dtMs);
       moveMs += dtMs;
       guardMoveMs += dtMs;
+      const pacing = getStage2Pacing(level, totalZoneCompletions, frightMs);
+      const activeGuardCount = activeMosherCount();
 
-      const playerStep = Math.max(72, 130 - level * 5);
+      const playerStep = pacing.playerStepMs;
       while (moveMs >= playerStep) {
         moveMs -= playerStep;
         const assistedTurn = consumeTurnIntent(turnAssist, stageMs, player.dir, (candidate) => {
@@ -1650,10 +1671,12 @@ function createMoshPitPacmanStage(): StageRuntime {
         checkGuardCollision();
       }
 
-      const guardStep = Math.max(90, 156 - level * 4) + (frightMs > 0 ? 24 : 0);
+      const guardStep = pacing.guardStepMs;
       while (guardMoveMs >= guardStep) {
         guardMoveMs -= guardStep;
-        for (const guard of guards) {
+        for (let i = 0; i < activeGuardCount; i += 1) {
+          const guard = guards[i];
+          if (!guard) continue;
           moveGuard(guard);
         }
         checkGuardCollision();
@@ -1684,6 +1707,30 @@ function createMoshPitPacmanStage(): StageRuntime {
       const unit = Math.min(cellX, cellY);
       const beatPulseRaw = 0.5 + Math.sin(performance.now() * 0.008) * 0.5;
       const beatPulse = Math.max(0, Math.min(1, beatPulseRaw * 0.8 + zoneMusic.intensity * 0.24));
+
+      function spriteReady(image: HTMLImageElement): boolean {
+        return image.complete && image.naturalWidth > 0;
+      }
+
+      function drawSpriteCentered(
+        image: HTMLImageElement,
+        centerX: number,
+        centerY: number,
+        drawSize: number,
+        rotationRad = 0,
+        alpha = 1
+      ): void {
+        const half = drawSize * 0.5;
+        context.save();
+        context.translate(centerX, centerY);
+        if (rotationRad !== 0) {
+          context.rotate(rotationRad);
+        }
+        context.globalAlpha *= alpha;
+        context.imageSmoothingEnabled = false;
+        context.drawImage(image, -half, -half, drawSize, drawSize);
+        context.restore();
+      }
 
       function drawZoneNoteGlyph(zone: number, x: number, y: number, size: number, color: string): void {
         context.fillStyle = color;
@@ -1828,16 +1875,43 @@ function createMoshPitPacmanStage(): StageRuntime {
 
       const angleMap: Record<Dir, number> = { right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2 };
       const facing = angleMap[player.dir];
-      context.fillStyle = frightMs > 0 ? "#33ffd6" : "#ffe35f";
-      context.beginPath();
-      context.moveTo(playerCenterX, playerCenterY);
-      context.arc(playerCenterX, playerCenterY, unit * 0.38, facing + 0.35, facing + Math.PI * 2 - 0.35);
-      context.closePath();
-      context.fill();
+      if (spriteReady(moshPitPlayerSpriteImage)) {
+        drawSpriteCentered(moshPitPlayerSpriteImage, playerCenterX, playerCenterY, unit * 1.15, facing + Math.PI / 2);
+        if (frightMs > 0) {
+          context.fillStyle = withAlpha("#5cf5d6", 0.12);
+          context.beginPath();
+          context.arc(playerCenterX, playerCenterY, unit * 0.58, 0, Math.PI * 2);
+          context.fill();
+        }
+      } else {
+        context.fillStyle = frightMs > 0 ? "#33ffd6" : "#ffe35f";
+        context.beginPath();
+        context.moveTo(playerCenterX, playerCenterY);
+        context.arc(playerCenterX, playerCenterY, unit * 0.38, facing + 0.35, facing + Math.PI * 2 - 0.35);
+        context.closePath();
+        context.fill();
+      }
 
+      const activeGuardCount = activeMosherCount();
       guards.forEach((guard, index) => {
         const gx = offX + guard.x * cellX + cellX * 0.5;
         const gy = offY + guard.y * cellY + cellY * 0.5;
+        const active = index < activeGuardCount;
+        if (!active) {
+          context.fillStyle = withAlpha("#b7a3d5", 0.24);
+          context.beginPath();
+          context.arc(gx, gy, unit * 0.28, 0, Math.PI * 2);
+          context.fill();
+          context.strokeStyle = withAlpha("#b7a3d5", 0.5);
+          context.lineWidth = 1.1;
+          context.beginPath();
+          context.moveTo(gx - unit * 0.16, gy);
+          context.lineTo(gx + unit * 0.16, gy);
+          context.moveTo(gx, gy - unit * 0.16);
+          context.lineTo(gx, gy + unit * 0.16);
+          context.stroke();
+          return;
+        }
         if (frightMs > 0) {
           context.fillStyle = "#4aa8ff";
           context.beginPath();
@@ -1851,6 +1925,13 @@ function createMoshPitPacmanStage(): StageRuntime {
           context.lineTo(gx + unit * 0.1, gy + unit * 0.12);
           context.lineTo(gx + unit * 0.25, gy + unit * 0.24);
           context.stroke();
+          return;
+        }
+
+        const guardVariant = getMosherGuardVariant(index);
+        const guardSprite = moshPitGuardSpriteImages[guardVariant];
+        if (spriteReady(guardSprite)) {
+          drawSpriteCentered(guardSprite, gx, gy, unit * 1.12);
           return;
         }
 
@@ -1906,7 +1987,7 @@ function createMoshPitPacmanStage(): StageRuntime {
       context.font = "10px monospace";
       context.textAlign = "right";
       const saveStatus = crowdSaveCharges > 0 ? "SAVE READY" : crowdSaveInvulnMs > 0 ? "RECOVERING" : "SAVE SPENT";
-      context.fillText(saveStatus, offX + fieldW - 2, zoneBarY - 4);
+      context.fillText(`MOSH ${activeGuardCount}/${guards.length} • ${saveStatus}`, offX + fieldW - 2, zoneBarY - 4);
       context.textAlign = "left";
     },
     getRawScore() {
@@ -1916,12 +1997,15 @@ function createMoshPitPacmanStage(): StageRuntime {
       return dead;
     },
     getHudHint() {
+      const active = activeMosherCount();
+      const pace = getStage2Pacing(level, totalZoneCompletions, frightMs);
       if (frightMs > 0) {
-        return `Backstage Pass Active • Chase security • Save ${crowdSaveCharges > 0 ? "Ready" : "Spent"}`;
+        return `Backstage Pass Active • Moshers ${active}/${guards.length} • Guard Tempo ${pace.guardStepMs}ms`;
       }
-      return `Collect picks. Complete zones for bonus. Save ${crowdSaveCharges > 0 ? "Ready" : "Spent"}`;
+      return `Clear zones to release moshers (${active}/${guards.length}) • Tempo ${pace.guardStepMs}ms`;
     },
     debugState() {
+      const pace = getStage2Pacing(level, totalZoneCompletions, frightMs);
       return {
         level,
         frightMs,
@@ -1930,6 +2014,8 @@ function createMoshPitPacmanStage(): StageRuntime {
         pelletsRemaining: pelletCount(),
         zoneCompletions: [...zoneCompletions],
         totalZoneCompletions,
+        activeMoshers: activeMosherCount(),
+        pacing: pace,
         renderCoverageY,
         musicLayers: zoneMusic.activeLayers,
         musicIntensity: zoneMusic.intensity,
@@ -1937,7 +2023,7 @@ function createMoshPitPacmanStage(): StageRuntime {
         playerWant: player.want,
         turnTelemetry: readTurnAssistTelemetry(turnAssist),
         player: { x: player.x, y: player.y },
-        guards: guards.map((guard) => ({ x: guard.x, y: guard.y }))
+        guards: guards.map((guard, index) => ({ x: guard.x, y: guard.y, active: index < activeMosherCount() }))
       };
     }
   };

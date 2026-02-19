@@ -1,0 +1,13 @@
+single centered sprite, retro pixel-art mosh-pit "bouncer" enemy for "Mosh-Pit Pac-Man".
+Top-down / slight 3-4 view readable at small size.
+Character concept: heavy club bouncer with broad shoulders, black tee, security armband, and chunky boots.
+Pose: stepping forward to block and corner the player.
+Silhouette should feel wide and intimidating.
+Palette: red jacket accents, charcoal blacks, amber highlights.
+Style requirements:
+- crisp pixel clusters
+- no blur
+- no anti-aliased look
+- no text, no logo, no watermark
+- plain neutral background only
+- tightly framed centered sprite

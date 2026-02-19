@@ -1,0 +1,14 @@
+single centered sprite, retro pixel-art festival runner character for a game called "Mosh-Pit Pac-Man".
+Top-down / slight 3-4 view readable at small size.
+Character concept: agile crowd runner wearing neon sneakers, torn denim, reflective wristbands, and headphones.
+Pose: mid-sprint with a slight lean, expression focused but playful.
+Silhouette should be clean and distinct from enemies.
+Palette: warm yellow / mint cyan / deep magenta accents, high contrast.
+Style requirements:
+- crisp pixel clusters
+- no blur
+- no anti-aliased look
+- no motion trails
+- no text, no logo, no watermark
+- plain neutral background only
+- keep the sprite tightly framed and centered

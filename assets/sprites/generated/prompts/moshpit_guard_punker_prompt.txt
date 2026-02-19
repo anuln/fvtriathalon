@@ -1,0 +1,13 @@
+single centered sprite, retro pixel-art punk mosh-pit enemy for "Mosh-Pit Pac-Man".
+Top-down / slight 3-4 view readable at small size.
+Character concept: spiked hair mohawk, patched vest, fingerless gloves, chain belt.
+Pose: diagonal rush with one shoulder forward, aggressive cornering vibe.
+Silhouette should be sharp and angular.
+Palette: hot pink, electric blue, black leather, silver chain highlights.
+Style requirements:
+- crisp pixel clusters
+- no blur
+- no anti-aliased look
+- no text, no logo, no watermark
+- plain neutral background only
+- tightly framed centered sprite

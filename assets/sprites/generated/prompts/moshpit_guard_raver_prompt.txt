@@ -1,0 +1,13 @@
+single centered sprite, retro pixel-art rave mosh-pit enemy for "Mosh-Pit Pac-Man".
+Top-down / slight 3-4 view readable at small size.
+Character concept: rave dancer with bucket hat, glow sticks, reflective jacket.
+Pose: side-step cut-off stance, arms out as if trapping lanes.
+Silhouette should feel energetic and readable in motion.
+Palette: cyan, violet, acid green, dark navy shadows.
+Style requirements:
+- crisp pixel clusters
+- no blur
+- no anti-aliased look
+- no text, no logo, no watermark
+- plain neutral background only
+- tightly framed centered sprite
