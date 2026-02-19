@@ -59,6 +59,12 @@ import {
   type RhythmSerpentPowerKind
 } from "./games/rhythm-serpent/guitarSoloPowerup";
 import {
+  createSnakeAudioDirector,
+  resolveSnakeAudioMode,
+  type SnakeAudioMode,
+  type SnakeAudioState
+} from "./games/rhythm-serpent/snakeAudioDirector";
+import {
   bootCopy,
   deathChoiceCopy,
   deathPauseCopy,
@@ -118,6 +124,7 @@ const THEME_OVERRIDE_KEY = "festiverse.theme.override";
 const THEME_CYCLE_KEY = "festiverse.theme.cycle";
 const THEME_CYCLE_INDEX_KEY = "festiverse.theme.cycle.index";
 const INITIALS_STORAGE_KEY = "festiverse.v1.initials";
+const SNAKE_AUDIO_MODE = resolveSnakeAudioMode(window.location.search, "v2");
 const FORCE_GUITAR_SOLO_POWER = new URLSearchParams(window.location.search).get("forceGuitarSoloPower") === "1";
 const GUITAR_SOLO_SFX_URL = new URL("../assets/audio/lyria2/oneshot_guitar_solo.wav", import.meta.url).href;
 const GUITAR_SOLO_SPRITE_URL = new URL("../assets/sprites/rhythm-serpent-guitar-solo.png", import.meta.url).href;
@@ -406,6 +413,37 @@ if (new URLSearchParams(window.location.search).get("adminThemeLab") === "1") {
   toggleAdminPanel(true);
 }
 
+function readSnakeAudioTelemetry(activeStage: StageRuntime): SnakeAudioTelemetry | null {
+  if (activeStage.id !== "rhythm-serpent") {
+    return null;
+  }
+  const debug = activeStage.debugState();
+  if (!debug || typeof debug !== "object") {
+    return null;
+  }
+  const payload = debug as Record<string, unknown>;
+  const comboRaw = payload.combo;
+  const snakeLengthRaw = payload.snakeLength;
+  const openingGraceRaw = payload.openingGraceMs;
+  const powerActiveRaw = payload.powerActive;
+  const powerActive =
+    powerActiveRaw && typeof powerActiveRaw === "object"
+      ? (powerActiveRaw as Record<string, unknown>)
+      : null;
+  const timedGrace =
+    (typeof openingGraceRaw === "number" && openingGraceRaw > 0) ||
+    (typeof powerActive?.bassDropMs === "number" && powerActive.bassDropMs > 0) ||
+    (typeof powerActive?.encoreMs === "number" && powerActive.encoreMs > 0) ||
+    (typeof powerActive?.moshBurstMs === "number" && powerActive.moshBurstMs > 0) ||
+    (typeof powerActive?.guitarSoloMs === "number" && powerActive.guitarSoloMs > 0);
+
+  return {
+    combo: Math.max(0, typeof comboRaw === "number" ? Math.round(comboRaw) : 0),
+    snakeLength: Math.max(3, typeof snakeLengthRaw === "number" ? Math.round(snakeLengthRaw) : 3),
+    graceActive: timedGrace
+  };
+}
+
 let previousTs = performance.now();
 function animate(ts: number): void {
   const dtMs = Math.min(64, Math.max(0, ts - previousTs));
@@ -471,7 +509,8 @@ function tick(dtMs: number): void {
     active: runActive && (mode === "playing" || mode === "deathPause" || mode === "deathChoice"),
     stage: STAGE_IDS[flow.currentStageIndex] ?? "rhythm-serpent",
     score: flow.stageRaw,
-    danger: mode === "deathPause" || mode === "deathChoice"
+    danger: mode === "deathPause" || mode === "deathChoice",
+    snakeTelemetry: readSnakeAudioTelemetry(stage)
   });
 }
 
@@ -4076,9 +4115,16 @@ type AudioUpdateInput = {
   stage: StageId;
   score: number;
   danger: boolean;
+  snakeTelemetry: SnakeAudioTelemetry | null;
 };
 
 type AudioTrigger = "death" | "commit" | "submit" | "pickup" | "zone" | "guitarSolo";
+
+type SnakeAudioTelemetry = {
+  combo: number;
+  snakeLength: number;
+  graceActive: boolean;
+};
 
 function createAudioEngine() {
   let started = false;
@@ -4099,6 +4145,17 @@ function createAudioEngine() {
   let prevDanger = false;
   let guitarSoloBuffer: AudioBuffer | null = null;
   let guitarSoloLoad: Promise<void> | null = null;
+  const snakeAudioMode: SnakeAudioMode = SNAKE_AUDIO_MODE;
+  const snakeAudioDirector = createSnakeAudioDirector();
+  let snakeAudioState: SnakeAudioState = snakeAudioDirector.getState();
+  let snakeEnergyIndex = 0;
+  let snakeScoreRate = 0;
+  let snakeLastSampleAt = 0;
+  let snakeLastScore = 0;
+  let snakeLastCombo = 0;
+  let snakeLastLength = 3;
+  let snakeComboMilestoneAt = Number.NEGATIVE_INFINITY;
+  let snakePickupEvents: number[] = [];
 
   function clamp(min: number, value: number, max: number): number {
     return Math.max(min, Math.min(max, value));
@@ -4181,7 +4238,7 @@ function createAudioEngine() {
     }
   }
 
-  function stageProfile(stage: StageId): {
+  type MusicProfile = {
     bpm: number;
     root: number;
     kick: number[];
@@ -4190,7 +4247,104 @@ function createAudioEngine() {
     bass: Array<number | null>;
     chords: Array<[number, number, number] | null>;
     lead: Array<number | null>;
-  } {
+  };
+
+  function snakeStateLayerFloor(state: SnakeAudioState): number {
+    if (state === "intro") return 1;
+    if (state === "build") return 2;
+    if (state === "vibe") return 3;
+    if (state === "hype") return 4;
+    if (state === "drop") return 6;
+    if (state === "breakdown") return 2;
+    return 5;
+  }
+
+  function snakeV2Profile(state: SnakeAudioState): MusicProfile {
+    if (state === "intro") {
+      return {
+        bpm: 118,
+        root: 110,
+        kick: [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        snare: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        hat: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+        bass: [0, null, null, null, null, null, 5, null, 0, null, null, null, null, null, 3, null],
+        chords: [[0, 3, 7], null, null, null, null, null, null, null, [-2, 2, 5], null, null, null, null, null, null, null],
+        lead: [null, null, null, null, 12, null, null, null, null, null, null, null, 14, null, null, null]
+      };
+    }
+    if (state === "build") {
+      return {
+        bpm: 118,
+        root: 110,
+        kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+        snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        hat: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+        bass: [0, null, 0, null, 3, null, 5, null, 0, null, 0, null, 7, null, 5, null],
+        chords: [[0, 3, 7], null, null, null, [0, 3, 8], null, null, null, [-2, 2, 5], null, null, null, [0, 3, 7], null, null, null],
+        lead: [null, null, 12, null, null, null, null, null, 14, null, null, null, null, 14, null, null]
+      };
+    }
+    if (state === "vibe") {
+      return {
+        bpm: 118,
+        root: 110,
+        kick: [1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0],
+        snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        hat: [1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1],
+        bass: [0, null, 0, null, 3, null, 5, null, 0, null, 0, null, 7, null, 5, null],
+        chords: [[0, 3, 7], null, null, null, [0, 3, 8], null, null, null, [-2, 2, 5], null, null, null, [0, 3, 7], null, null, null],
+        lead: [null, 12, null, null, 14, null, null, 15, null, null, 17, null, null, 15, null, null]
+      };
+    }
+    if (state === "hype") {
+      return {
+        bpm: 118,
+        root: 110,
+        kick: [1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1],
+        snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0],
+        hat: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        bass: [0, null, 0, 5, 3, null, 5, null, 0, null, 0, 7, 7, null, 5, null],
+        chords: [[0, 3, 7], null, null, null, [0, 3, 8], null, null, null, [-2, 2, 5], null, null, null, [3, 7, 10], null, null, null],
+        lead: [12, null, null, 14, null, null, 15, null, 17, null, null, 15, null, 14, null, 12]
+      };
+    }
+    if (state === "drop") {
+      return {
+        bpm: 118,
+        root: 110,
+        kick: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+        snare: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+        hat: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        bass: [0, 0, 7, 0, 5, 0, 7, 0, 0, 0, 7, 0, 5, 0, 3, 0],
+        chords: [[0, 3, 7], null, [0, 3, 8], null, [-2, 2, 5], null, [0, 3, 7], null, [3, 7, 10], null, [0, 3, 8], null, [-2, 2, 5], null, [0, 3, 7], null],
+        lead: [12, null, 15, null, 17, null, 19, null, 17, null, 15, null, 14, null, 12, null]
+      };
+    }
+    if (state === "breakdown") {
+      return {
+        bpm: 118,
+        root: 110,
+        kick: [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        snare: [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        hat: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+        bass: [0, null, null, null, null, null, 5, null, 0, null, null, null, null, null, 3, null],
+        chords: [[-2, 2, 5], null, null, null, null, null, null, null, [0, 3, 7], null, null, null, null, null, null, null],
+        lead: [null, null, 12, null, null, null, null, null, null, null, 10, null, null, null, null, null]
+      };
+    }
+    return {
+      bpm: 118,
+      root: 110,
+      kick: [1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0],
+      snare: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      hat: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+      bass: [0, null, 0, null, 3, null, 5, null, 0, null, 0, null, 7, null, 5, null],
+      chords: [[0, 3, 7], null, null, null, [0, 3, 8], null, null, null, [-2, 2, 5], null, null, null, [0, 3, 7], null, null, null],
+      lead: [12, null, null, 14, null, null, 15, null, 17, null, null, 15, null, 14, null, 12]
+    };
+  }
+
+  function legacyStageProfile(stage: StageId): MusicProfile {
     if (stage === "rhythm-serpent") {
       return {
         bpm: 118,
@@ -4225,6 +4379,13 @@ function createAudioEngine() {
       chords: [[0, 3, 7], null, null, null, [-2, 1, 5], null, null, null, [5, 8, 12], null, null, null, [3, 7, 10], null, null, null],
       lead: [12, null, 15, null, 17, null, 15, null, 19, null, 17, null, 15, null, 14, null]
     };
+  }
+
+  function stageProfile(stage: StageId): MusicProfile {
+    if (stage === "rhythm-serpent" && snakeAudioMode === "v2") {
+      return snakeV2Profile(snakeAudioState);
+    }
+    return legacyStageProfile(stage);
   }
 
   function toFreq(root: number, semitoneOffset: number): number {
@@ -4354,15 +4515,120 @@ function createAudioEngine() {
     playOscVoice(time, musicGain, type, toFreq(root * 4, semitone), 0.12, 0.028 + intensity * 0.02);
   }
 
-  function scheduleStep(stage: StageId, score: number, danger: boolean): void {
+  function triggerSnakeHypeRiser(now: number): void {
+    if (!audioContext || !sfxGain || !noiseBuffer) return;
+    const src = audioContext.createBufferSource();
+    src.buffer = noiseBuffer;
+    const hp = audioContext.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.setValueAtTime(900, now);
+    hp.frequency.exponentialRampToValueAtTime(5200, now + 0.5);
+    const gain = audioContext.createGain();
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.exponentialRampToValueAtTime(0.08, now + 0.32);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
+    src.connect(hp).connect(gain).connect(sfxGain);
+    src.start(now);
+    src.stop(now + 0.54);
+  }
+
+  function triggerSnakeDropImpact(now: number): void {
+    if (!audioContext || !sfxGain || !drumGain || !noiseBuffer) return;
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(38, now + 0.22);
+    scheduleEnvelope(gain, now, 0.002, 0.03, 0.22, 0.24);
+    osc.connect(gain).connect(drumGain);
+    osc.start(now);
+    osc.stop(now + 0.26);
+
+    const noise = audioContext.createBufferSource();
+    noise.buffer = noiseBuffer;
+    const bp = audioContext.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(1400, now);
+    const noiseGain = audioContext.createGain();
+    scheduleEnvelope(noiseGain, now, 0.001, 0.02, 0.14, 0.1);
+    noise.connect(bp).connect(noiseGain).connect(sfxGain);
+    noise.start(now);
+    noise.stop(now + 0.2);
+  }
+
+  function triggerSnakeFlowLift(now: number): void {
+    if (!audioContext || !sfxGain) return;
+    const base = 329.63;
+    for (const [idx, semi] of [0, 4, 7, 12].entries()) {
+      const t = now + idx * 0.035;
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(toFreq(base, semi), t);
+      scheduleEnvelope(gain, t, 0.002, 0.02, 0.12, 0.11);
+      osc.connect(gain).connect(sfxGain);
+      osc.start(t);
+      osc.stop(t + 0.16);
+    }
+  }
+
+  function scheduleStep(input: AudioUpdateInput): void {
     if (!audioContext || !musicGain || !drumGain || !sfxGain || !synthFilter) return;
+    const stage = input.stage;
     const profile = stageProfile(stage);
     const step = step16 % 16;
     const time = nextStepAt;
-    const dynamic = clamp(0.18, 0.22 + score / 2200 + (danger ? 0.1 : 0), 1);
-    energy = dynamic;
+    let dynamic = clamp(0.18, 0.22 + input.score / 2200 + (input.danger ? 0.1 : 0), 1);
+    let layer = clamp(1, 1 + Math.floor(input.score / 260), 6);
 
-    const layer = clamp(1, 1 + Math.floor(score / 260), 6);
+    if (stage === "rhythm-serpent" && snakeAudioMode === "v2") {
+      const pickupDensity = clamp(0, snakePickupEvents.length / 8, 1);
+      const advance = snakeAudioDirector.advance({
+        step16,
+        nowSeconds: time,
+        sample: {
+          score: input.score,
+          combo: snakeLastCombo,
+          snakeLength: snakeLastLength,
+          scoreRate: snakeScoreRate,
+          pickupDensity,
+          danger: input.danger,
+          comboMilestoneRecent: time - snakeComboMilestoneAt <= 10,
+          hasPositiveMomentum: snakeScoreRate >= 18
+        }
+      });
+      snakeAudioState = advance.state;
+      snakeEnergyIndex = advance.energyIndex;
+
+      if (advance.transitionEvent === "enter-hype") {
+        triggerSnakeHypeRiser(time);
+      } else if (advance.transitionEvent === "enter-drop") {
+        triggerSnakeDropImpact(time);
+      } else if (advance.transitionEvent === "enter-flow") {
+        triggerSnakeFlowLift(time);
+      }
+
+      const stateBoost =
+        snakeAudioState === "drop"
+          ? 0.24
+          : snakeAudioState === "hype"
+          ? 0.12
+          : snakeAudioState === "flow"
+          ? 0.08
+          : snakeAudioState === "breakdown"
+          ? -0.1
+          : 0;
+      dynamic = clamp(0.18, dynamic + stateBoost, 1);
+      const layerFloor = snakeStateLayerFloor(snakeAudioState);
+      layer = Math.max(layer, layerFloor);
+      if (snakeAudioState === "breakdown") {
+        layer = Math.min(layer, 3);
+      }
+    } else {
+      snakeAudioState = snakeAudioDirector.getState();
+      snakeEnergyIndex = 0;
+    }
+    energy = dynamic;
 
     if (profile.kick[step]) scheduleKick(time, stage, dynamic);
     if (profile.snare[step] && layer >= 2) scheduleSnare(time, dynamic);
@@ -4380,7 +4646,7 @@ function createAudioEngine() {
     if (lead !== null && layer >= 4) scheduleLead(time + 0.02, profile.root, lead, dynamic, stage);
 
     synthFilter.frequency.setTargetAtTime(
-      clamp(420, 900 + layer * 320 + dynamic * 600 + (stage === "amp-invaders" ? 380 : 0) + (danger ? 700 : 0), 8200),
+      clamp(420, 900 + layer * 320 + dynamic * 600 + (stage === "amp-invaders" ? 380 : 0) + (input.danger ? 700 : 0), 8200),
       time,
       0.05
     );
@@ -4392,6 +4658,10 @@ function createAudioEngine() {
     const sfx = sfxGain;
     if (now - prevPickupAt < 0.055) return;
     prevPickupAt = now;
+    if (currentStage === "rhythm-serpent") {
+      snakePickupEvents.push(now);
+      snakePickupEvents = snakePickupEvents.filter((stamp) => now - stamp <= 10);
+    }
     const base = currentStage === "amp-invaders" ? 523.25 : currentStage === "moshpit-pacman" ? 587.33 : 659.25;
     const intervals = [0, 3, 7];
     intervals.forEach((offset, index) => {
@@ -4533,7 +4803,7 @@ function createAudioEngine() {
     const profile = stageProfile(input.stage);
     const stepDur = 60 / profile.bpm / 4;
     while (nextStepAt < audioContext.currentTime + 0.22) {
-      scheduleStep(input.stage, input.score, input.danger);
+      scheduleStep(input);
       nextStepAt += stepDur;
       step16 += 1;
     }
@@ -4568,6 +4838,14 @@ function createAudioEngine() {
       }
       triggerSubmit(now);
     },
+    debugState() {
+      return {
+        snakeAudioMode,
+        snakeAudioState: snakeAudioMode === "v2" ? snakeAudioState : "legacy",
+        snakeEnergyIndex: snakeAudioMode === "v2" ? Number(snakeEnergyIndex.toFixed(3)) : null,
+        snakeScoreRate: snakeAudioMode === "v2" ? Number(snakeScoreRate.toFixed(2)) : null
+      };
+    },
     update(input: AudioUpdateInput): void {
       if (!started || !audioContext || !masterGain || !musicGain || !duckGain || !drumGain || !sfxGain || !synthFilter) return;
       const now = audioContext.currentTime;
@@ -4578,7 +4856,17 @@ function createAudioEngine() {
 
       const targetMaster = input.active ? 0.38 : 0.0001;
       masterGain.gain.setTargetAtTime(targetMaster, now, 0.12);
-      const baseMusicLevel = clamp(0.42, 0.56 + input.score / 2600 + (input.danger ? 0.06 : 0), 0.86);
+      const snakeMusicBoost =
+        input.stage === "rhythm-serpent" && snakeAudioMode === "v2"
+          ? snakeAudioState === "drop"
+            ? 0.08
+            : snakeAudioState === "flow"
+            ? 0.05
+            : snakeAudioState === "breakdown"
+            ? -0.06
+            : 0
+          : 0;
+      const baseMusicLevel = clamp(0.42, 0.56 + input.score / 2600 + (input.danger ? 0.06 : 0) + snakeMusicBoost, 0.9);
       musicGain.gain.setTargetAtTime(input.active ? baseMusicLevel : 0.0001, now, 0.11);
       drumGain.gain.setTargetAtTime(input.active ? 0.84 : 0.0001, now, 0.08);
       sfxGain.gain.setTargetAtTime(input.active ? 0.5 : 0.0001, now, 0.08);
@@ -4589,6 +4877,36 @@ function createAudioEngine() {
         currentStage = input.stage;
         nextStepAt = now + 0.03;
         step16 = 0;
+        snakeAudioDirector.reset();
+        snakeAudioState = snakeAudioDirector.getState();
+        snakeEnergyIndex = 0;
+        snakeScoreRate = 0;
+        snakeLastSampleAt = now;
+        snakeLastScore = input.score;
+        snakeLastCombo = 0;
+        snakeLastLength = 3;
+        snakeComboMilestoneAt = Number.NEGATIVE_INFINITY;
+        snakePickupEvents = [];
+      }
+
+      if (input.stage === "rhythm-serpent") {
+        const comboNow = Math.max(0, input.snakeTelemetry?.combo ?? snakeLastCombo);
+        if (snakeLastCombo < 5 && comboNow >= 5) {
+          snakeComboMilestoneAt = now;
+        }
+        snakeLastCombo = comboNow;
+        snakeLastLength = Math.max(3, input.snakeTelemetry?.snakeLength ?? snakeLastLength);
+        if (snakeLastSampleAt <= 0) {
+          snakeLastSampleAt = now;
+          snakeLastScore = input.score;
+        }
+        const dtSeconds = Math.max(0.001, now - snakeLastSampleAt);
+        const scoreDelta = Math.max(0, input.score - snakeLastScore);
+        const instantScoreRate = scoreDelta / dtSeconds;
+        snakeScoreRate = snakeScoreRate * 0.72 + instantScoreRate * 0.28;
+        snakeLastSampleAt = now;
+        snakeLastScore = input.score;
+        snakePickupEvents = snakePickupEvents.filter((stamp) => now - stamp <= 10);
       }
 
       if (!prevDanger && input.danger) {
@@ -4622,7 +4940,8 @@ function renderGameToText(): string {
     finalScore: summary.totalScore,
     totalTri: totalBankedScore(),
     theme: activeTheme.id,
-    stageState: stage.debugState()
+    stageState: stage.debugState(),
+    audioState: audio.debugState?.()
   });
 }
 
