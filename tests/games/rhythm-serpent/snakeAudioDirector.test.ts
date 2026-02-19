@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createSnakeAudioDirector,
   resolveSnakeAudioMode,
+  resolveSnakePhaseVisual,
   type SnakeAudioState
 } from "../../../src/games/rhythm-serpent/snakeAudioDirector";
 
@@ -174,5 +175,19 @@ describe("createSnakeAudioDirector", () => {
     });
 
     expect(blocked.state).toBe("hype");
+  });
+});
+
+describe("resolveSnakePhaseVisual", () => {
+  it("uses v2 labels for early states when mode is v2", () => {
+    expect(resolveSnakePhaseVisual({ score: 0, mode: "v2", state: "intro" }).label).toBe("INTRO");
+    expect(resolveSnakePhaseVisual({ score: 150, mode: "v2", state: "build" }).label).toBe("BUILD");
+    expect(resolveSnakePhaseVisual({ score: 260, mode: "v2", state: "vibe" }).label).toBe("VIBE");
+  });
+
+  it("falls back to legacy score labels in legacy mode", () => {
+    expect(resolveSnakePhaseVisual({ score: 80, mode: "legacy", state: "flow" }).label).toBe("OPENING");
+    expect(resolveSnakePhaseVisual({ score: 100, mode: "legacy", state: "flow" }).label).toBe("BUILD-UP");
+    expect(resolveSnakePhaseVisual({ score: 260, mode: "legacy", state: "flow" }).label).toBe("THE DROP");
   });
 });

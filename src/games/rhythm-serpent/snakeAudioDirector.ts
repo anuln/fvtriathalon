@@ -31,6 +31,18 @@ export type SnakeAudioAdvanceResult = {
   transitionEvent: SnakeAudioTransitionEvent | null;
 };
 
+export type SnakePhaseVisual = {
+  label: string;
+  accent: string;
+  gridAlpha: number;
+};
+
+export type ResolveSnakePhaseVisualInput = {
+  score: number;
+  mode: SnakeAudioMode;
+  state?: SnakeAudioState | null;
+};
+
 const EIGHT_BARS_STEP16 = 128;
 const DROP_ENERGY_THRESHOLD = 0.78;
 const DROP_ENERGY_BARS_REQUIRED = 2;
@@ -39,6 +51,16 @@ const STAGE_THRESHOLDS: Record<"build" | "vibe" | "hype", number> = {
   build: 0.22,
   vibe: 0.38,
   hype: 0.58
+};
+
+const V2_PHASE_VISUALS: Record<SnakeAudioState, SnakePhaseVisual> = {
+  intro: { label: "INTRO", accent: "#ff6ec7", gridAlpha: 0.18 },
+  build: { label: "BUILD", accent: "#ff5ecf", gridAlpha: 0.22 },
+  vibe: { label: "VIBE", accent: "#ff44aa", gridAlpha: 0.26 },
+  hype: { label: "HYPE", accent: "#ff2f8e", gridAlpha: 0.3 },
+  drop: { label: "DROP", accent: "#ff2266", gridAlpha: 0.34 },
+  breakdown: { label: "BREAKDOWN", accent: "#7be7ff", gridAlpha: 0.24 },
+  flow: { label: "FLOW", accent: "#00e5ff", gridAlpha: 0.3 }
 };
 
 function clamp(min: number, value: number, max: number): number {
@@ -76,6 +98,19 @@ export function resolveSnakeAudioMode(search: string, fallback: SnakeAudioMode =
     return mode;
   }
   return fallback;
+}
+
+export function resolveSnakePhaseVisual(input: ResolveSnakePhaseVisualInput): SnakePhaseVisual {
+  if (input.mode === "v2" && input.state) {
+    return V2_PHASE_VISUALS[input.state];
+  }
+  if (input.score >= 220) {
+    return { label: "THE DROP", accent: "#ff2266", gridAlpha: 0.34 };
+  }
+  if (input.score >= 90) {
+    return { label: "BUILD-UP", accent: "#ff44aa", gridAlpha: 0.26 };
+  }
+  return { label: "OPENING", accent: "#ff6ec7", gridAlpha: 0.18 };
 }
 
 export function createSnakeAudioDirector() {

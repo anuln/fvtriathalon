@@ -61,6 +61,7 @@ import {
 import {
   createSnakeAudioDirector,
   resolveSnakeAudioMode,
+  resolveSnakePhaseVisual,
   type SnakeAudioMode,
   type SnakeAudioState
 } from "./games/rhythm-serpent/snakeAudioDirector";
@@ -444,6 +445,21 @@ function readSnakeAudioTelemetry(activeStage: StageRuntime): SnakeAudioTelemetry
   };
 }
 
+function parseSnakeAudioState(value: unknown): SnakeAudioState | null {
+  if (
+    value === "intro" ||
+    value === "build" ||
+    value === "vibe" ||
+    value === "hype" ||
+    value === "drop" ||
+    value === "breakdown" ||
+    value === "flow"
+  ) {
+    return value;
+  }
+  return null;
+}
+
 let previousTs = performance.now();
 function animate(ts: number): void {
   const dtMs = Math.min(64, Math.max(0, ts - previousTs));
@@ -766,7 +782,9 @@ function startStage(index: number): void {
   flow.elapsedInStageMs = 0;
   flow.stageRaw = 0;
   stage = createStage(index);
-  input.setStage(STAGE_IDS[index] ?? "rhythm-serpent");
+  const stageId = STAGE_IDS[index] ?? "rhythm-serpent";
+  input.setStage(stageId);
+  audio.resetStage(stageId);
   stageAttemptStartMs = globalElapsedMs;
 }
 
@@ -1206,12 +1224,12 @@ function createRhythmSerpentStage(): StageRuntime {
       }
     },
     draw(context, width, height, theme, pulse) {
-      const phase =
-        score >= 220
-          ? { label: "THE DROP", accent: "#ff2266", gridAlpha: 0.34 }
-          : score >= 90
-          ? { label: "BUILD-UP", accent: "#ff44aa", gridAlpha: 0.26 }
-          : { label: "OPENING", accent: "#ff6ec7", gridAlpha: 0.18 };
+      const audioDebug = audio.debugState?.();
+      const phase = resolveSnakePhaseVisual({
+        score,
+        mode: audioDebug?.snakeAudioMode === "legacy" ? "legacy" : "v2",
+        state: parseSnakeAudioState(audioDebug?.snakeAudioState)
+      });
       const cell = Math.floor(Math.min(width / cols, height / rows));
       const fieldW = cols * cell;
       const fieldH = rows * cell;
@@ -4809,9 +4827,30 @@ function createAudioEngine() {
     }
   }
 
+  function resetSnakeRuntime(now: number, score: number): void {
+    snakeAudioDirector.reset();
+    snakeAudioState = snakeAudioDirector.getState();
+    snakeEnergyIndex = 0;
+    snakeScoreRate = 0;
+    snakeLastSampleAt = now;
+    snakeLastScore = score;
+    snakeLastCombo = 0;
+    snakeLastLength = 3;
+    snakeComboMilestoneAt = Number.NEGATIVE_INFINITY;
+    snakePickupEvents = [];
+  }
+
   return {
     start(): void {
       ensureStarted();
+    },
+    resetStage(stage: StageId): void {
+      currentStage = stage;
+      step16 = 0;
+      prevDanger = false;
+      const now = audioContext?.currentTime ?? 0;
+      nextStepAt = now + 0.03;
+      resetSnakeRuntime(now, 0);
     },
     trigger(kind: AudioTrigger): void {
       if (!started || !audioContext || !sfxGain) return;
@@ -4877,16 +4916,7 @@ function createAudioEngine() {
         currentStage = input.stage;
         nextStepAt = now + 0.03;
         step16 = 0;
-        snakeAudioDirector.reset();
-        snakeAudioState = snakeAudioDirector.getState();
-        snakeEnergyIndex = 0;
-        snakeScoreRate = 0;
-        snakeLastSampleAt = now;
-        snakeLastScore = input.score;
-        snakeLastCombo = 0;
-        snakeLastLength = 3;
-        snakeComboMilestoneAt = Number.NEGATIVE_INFINITY;
-        snakePickupEvents = [];
+        resetSnakeRuntime(now, input.score);
       }
 
       if (input.stage === "rhythm-serpent") {
