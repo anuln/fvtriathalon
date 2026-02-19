@@ -549,3 +549,30 @@ Original prompt: Yes, I want to build the whole game and have it be running. Let
     - amp-specialist average share ~ S1 11.1% / S2 18.6% / S3 70.3%
 
 - Simulation reporting now includes both base stage-sum score and final score with time bonus.
+- Guitar symbol cadence + grace indicator pass:
+  - Replaced guitar-solo symbol with new lime outline mark using transparent background:
+    - updated fallback sprite map + palette in `src/games/rhythm-serpent/guitarSoloPowerup.ts`
+    - regenerated PNG asset `assets/sprites/rhythm-serpent-guitar-solo.png` (transparent background)
+  - Added deterministic guitar-solo spawn cadence helpers:
+    - `getGuitarSoloSpawnAtMs(index)` with anchors at 15s, 45s, 90s and progressive later intervals (150s, 225s, 315s, ...)
+  - Added grace-state helper:
+    - `isRhythmGraceActive(openingGraceMs, timers)`
+  - Rhythm Serpent runtime updates in `src/main.ts`:
+    - guitar-solo now spawns on cadence schedule (random spawn pool keeps bass-drop/encore/mosh-burst)
+    - debug force (`?forceGuitarSoloPower=1`) still works
+    - added `stage.isGraceActive()` hook for HUD layer
+    - stage debug now includes `openingGraceMs` + `nextGuitarSoloSpawnMs`
+  - Footer HUD updates in `src/main.ts` + injected CSS:
+    - added blinking `GRACE` badge in bottom footer
+    - badge shows only while opening wall-drift grace or any active power-up grace timer is active
+  - TDD updates:
+    - extended `tests/games/rhythm-serpent/guitarSoloPowerup.test.ts` for:
+      - deterministic cadence assertions
+      - grace-activity assertions
+- Verification (fresh):
+  - `npm run test -- tests/games/rhythm-serpent/guitarSoloPowerup.test.ts`: pass (5 tests)
+  - `npm run test -- tests/games/rhythm-serpent/rhythmSerpentRules.test.ts`: pass
+  - `npm run build`: pass
+  - `npm run lint`: pass
+  - develop-web-game client smoke capture (state contract):
+    - `output/web-game/guitar-grace-pass-smoke/state-0.json` confirms forced guitar spawn and `nextGuitarSoloSpawnMs: 15000`

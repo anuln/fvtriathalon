@@ -40,6 +40,7 @@ import { createWaveDirectorV2 } from "./games/amp-invaders/waveDirectorV2";
 import { createEnemyDirector } from "./games/amp-invaders/enemyDirector";
 import { createBossDirector } from "./games/amp-invaders/bossDirector";
 import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specials";
+import { shouldEnterBossOnWaveClear } from "./games/amp-invaders/stageFlow";
 import { pickWave1EnemyVariant, type Wave1EnemyVariant } from "./games/amp-invaders/wave1SpriteRoster";
 import { getActiveMoshers, getStage2Pacing } from "./games/moshpit-pacman/moshPitEscalation";
 import { getMosherGuardVariant, type MoshPitGuardVariant } from "./games/moshpit-pacman/moshPitSpriteRoster";
@@ -52,7 +53,9 @@ import {
   GUITAR_SOLO_POWER_KIND,
   GUITAR_SOLO_SCORE_MULTIPLIER,
   GUITAR_SOLO_SPRITE,
-  RHYTHM_SERPENT_POWER_KINDS,
+  getGuitarSoloSpawnAtMs,
+  isRhythmGraceActive,
+  type RhythmSerpentGraceTimers,
   type RhythmSerpentPowerKind
 } from "./games/rhythm-serpent/guitarSoloPowerup";
 import {
@@ -101,6 +104,7 @@ type StageRuntime = {
   getRawScore: () => number;
   isDead: () => boolean;
   isCleared?: () => boolean;
+  isGraceActive?: () => boolean;
   getHudHint: () => string;
   debugState: () => unknown;
   forceWaveClearForTest?: () => void;
@@ -176,6 +180,7 @@ app.innerHTML = `
     <footer class="action-rail">
       <div class="stage-meta">
         <span id="hud-score">Stage: 0 • Total: 0</span>
+        <span id="hud-grace" class="grace-indicator hidden">GRACE</span>
       </div>
       <button id="commit-btn" class="btn primary hidden">LOCK STAGE</button>
     </footer>
@@ -188,6 +193,7 @@ const adminPanel = must(document.querySelector<HTMLDivElement>("#admin-panel"), 
 const hudTime = must(document.querySelector<HTMLDivElement>("#hud-time"), "Missing hud time");
 const hudStage = must(document.querySelector<HTMLDivElement>("#hud-stage"), "Missing hud stage");
 const hudScore = must(document.querySelector<HTMLSpanElement>("#hud-score"), "Missing hud score");
+const hudGrace = must(document.querySelector<HTMLSpanElement>("#hud-grace"), "Missing hud grace");
 const commitBtn = must(document.querySelector<HTMLButtonElement>("#commit-btn"), "Missing commit button");
 
 const ctx = must(canvas.getContext("2d"), "2D canvas context unavailable");
@@ -503,6 +509,7 @@ function syncHud(): void {
   const leftMs = Math.max(0, RUN_TOTAL_MS - globalElapsedMs);
   const compactHud = frameWidth <= 520;
   const summary = finalScoreSummary();
+  const graceActive = mode === "playing" && (stage.isGraceActive?.() ?? false);
   hudTime.textContent = formatMs(leftMs);
   hudStage.textContent =
     mode === "results" || mode === "leaderboard"
@@ -516,6 +523,8 @@ function syncHud(): void {
     mode === "results" || mode === "leaderboard"
       ? `Set Total: ${summary.baseScore} • Final: ${summary.totalScore}`
       : `Stage: ${Math.round(flow.stageRaw)} • Total: ${totalBankedScore()}`;
+  hudGrace.classList.toggle("hidden", !graceActive);
+  hudGrace.textContent = graceActive ? "GRACE" : "";
 }
 
 function syncCommitButton(): void {
@@ -887,6 +896,8 @@ function createRhythmSerpentStage(): StageRuntime {
     encoreMs: 0,
     moshBurstMs: 0
   };
+  const randomPowerKinds: RhythmSerpentPowerKind[] = ["bass-drop", "encore", "mosh-burst"];
+  let nextGuitarSoloSpawnIndex = 0;
 
   if (FORCE_GUITAR_SOLO_POWER) {
     let forcedX = (spawnX + 4) % cols;
@@ -933,20 +944,33 @@ function createRhythmSerpentStage(): StageRuntime {
     food = randomGridPoint(cols, rows, snake, power);
     foodIcon = instrumentIcons[Math.floor(Math.random() * instrumentIcons.length)];
     if (!power && Math.random() < 0.18) {
-      const forcedKind =
-        FORCE_GUITAR_SOLO_POWER && !forcedGuitarSpawned ? GUITAR_SOLO_POWER_KIND : null;
       power = {
         ...randomGridPoint(cols, rows, snake, null, food),
-        kind:
-          forcedKind ??
-          RHYTHM_SERPENT_POWER_KINDS[Math.floor(Math.random() * RHYTHM_SERPENT_POWER_KINDS.length)] ??
-          "bass-drop"
+        kind: randomPowerKinds[Math.floor(Math.random() * randomPowerKinds.length)] ?? "bass-drop"
       };
       powerIcon = iconForPower(power.kind);
-      if (power.kind === GUITAR_SOLO_POWER_KIND) {
-        forcedGuitarSpawned = true;
-      }
     }
+  }
+
+  function spawnGuitarSoloPower(): void {
+    power = {
+      ...randomGridPoint(cols, rows, snake, null, food),
+      kind: GUITAR_SOLO_POWER_KIND
+    };
+    powerIcon = "";
+    forcedGuitarSpawned = true;
+  }
+
+  function maybeSpawnCadencedGuitarSolo(): void {
+    if (power) {
+      return;
+    }
+    const dueAt = getGuitarSoloSpawnAtMs(nextGuitarSoloSpawnIndex);
+    if (stageMs < dueAt) {
+      return;
+    }
+    spawnGuitarSoloPower();
+    nextGuitarSoloSpawnIndex += 1;
   }
 
   function drawGuitarSoloSprite(
@@ -1020,6 +1044,10 @@ function createRhythmSerpentStage(): StageRuntime {
       timers.encoreMs = Math.max(0, timers.encoreMs - dtMs);
       timers.moshBurstMs = Math.max(0, timers.moshBurstMs - dtMs);
       guitarSoloFxMs = Math.max(0, guitarSoloFxMs - dtMs);
+      if (!forcedGuitarSpawned && FORCE_GUITAR_SOLO_POWER && !power) {
+        spawnGuitarSoloPower();
+      }
+      maybeSpawnCadencedGuitarSolo();
 
       const baseTick = 150 - Math.min(56, snake.length * 2);
       let tick = baseTick;
@@ -1459,6 +1487,15 @@ function createRhythmSerpentStage(): StageRuntime {
     isDead() {
       return dead;
     },
+    isGraceActive() {
+      const graceTimers: RhythmSerpentGraceTimers = {
+        bassDropMs: timers.bassDropMs,
+        encoreMs: timers.encoreMs,
+        moshBurstMs: timers.moshBurstMs,
+        guitarSoloMs: guitarSoloFxMs
+      };
+      return isRhythmGraceActive(openingGraceMs, graceTimers);
+    },
     getHudHint() {
       const active =
         guitarSoloFxMs > 0
@@ -1482,6 +1519,8 @@ function createRhythmSerpentStage(): StageRuntime {
         combo,
         snakeLength: snake.length,
         pendingPowerKind: power?.kind ?? null,
+        openingGraceMs,
+        nextGuitarSoloSpawnMs: getGuitarSoloSpawnAtMs(nextGuitarSoloSpawnIndex),
         powerActive: {
           ...timers,
           guitarSoloMs: guitarSoloFxMs,
@@ -2663,7 +2702,12 @@ function createAmpInvadersStage(): StageRuntime {
       }
 
       if (!inBoss && aliveEnemies().length === 0) {
-        if (wave >= STAGE3_V2_DEFAULT_CONFIG.boss.entryWave) {
+        if (shouldEnterBossOnWaveClear(wave, STAGE3_V2_DEFAULT_CONFIG.boss.entryWave)) {
+          waveState = waveDirector.advanceOnWaveClear();
+          wave = waveState.wave;
+          genre = waveState.genre;
+          spreadTier = waveState.spreadTier;
+          nextUpgradeWave = waveState.nextUpgradeWave;
           inBoss = true;
           bossX = width * 0.5;
           bossY = 84;
@@ -2834,10 +2878,22 @@ function createAmpInvadersStage(): StageRuntime {
       const bulletSpriteKeys = getBulletSpriteKeysForWaveLocal(wave);
       const playerBulletSprite = ampBulletImages[bulletSpriteKeys.player];
       const enemyBulletSprite = ampBulletImages[bulletSpriteKeys.enemy];
+      const waveCycleForBulletSprites = getWaveCycleForSprites(wave);
       bullets.forEach((bullet) => {
         const sprite = bullet.enemy ? enemyBulletSprite : playerBulletSprite;
         const canDrawBulletSprite = sprite.complete && sprite.naturalWidth > 0 && sprite.naturalHeight > 0;
         if (canDrawBulletSprite) {
+          if (bullet.enemy && waveCycleForBulletSprites === 3) {
+            context.fillStyle = withAlpha("#8be8ff", 0.34);
+            context.beginPath();
+            context.arc(bullet.x, bullet.y, 9, 0, Math.PI * 2);
+            context.fill();
+            context.strokeStyle = withAlpha("#d8fdff", 0.72);
+            context.lineWidth = 1.5;
+            context.beginPath();
+            context.arc(bullet.x, bullet.y, 6.5, 0, Math.PI * 2);
+            context.stroke();
+          }
           const spriteHeight = bullet.enemy ? 20 : 26;
           const spriteWidth = bullet.enemy ? 14 : 16;
           context.drawImage(
@@ -3705,6 +3761,25 @@ function injectStyles(): void {
       text-shadow: 0 0 10px rgba(0, 230, 255, 0.22);
       min-width: 0;
       flex: 1;
+    }
+    .grace-indicator {
+      align-self: end;
+      width: fit-content;
+      font-size: 10px;
+      line-height: 1;
+      letter-spacing: 0.14em;
+      font-weight: 800;
+      color: #ffe45a;
+      text-shadow: 0 0 10px rgba(255, 228, 90, 0.8);
+      animation: grace-blink 640ms steps(2, jump-none) infinite;
+    }
+    @keyframes grace-blink {
+      0%, 49% {
+        opacity: 1;
+      }
+      50%, 100% {
+        opacity: 0.26;
+      }
     }
     #hud-score {
       white-space: nowrap;
