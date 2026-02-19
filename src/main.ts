@@ -1,6 +1,7 @@
 import { computeFinalScore, computeStageScore } from "./domain/scoring";
 import { getStageBeatPulse } from "./domain/beatPulse";
 import { computeRhythmSerpentGrid } from "./domain/rhythmSerpentLayout";
+import { getStageIcon } from "./domain/stageIcons";
 import {
   classifyTouchGesture,
   getMobileInputProfile,
@@ -39,6 +40,7 @@ import {
 import { createWaveDirectorV2 } from "./games/amp-invaders/waveDirectorV2";
 import { createEnemyDirector } from "./games/amp-invaders/enemyDirector";
 import { createBossDirector } from "./games/amp-invaders/bossDirector";
+import { formatAmpLivesHearts } from "./games/amp-invaders/livesHud";
 import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specials";
 import { shouldEnterBossOnWaveClear } from "./games/amp-invaders/stageFlow";
 import { pickWave1EnemyVariant, type Wave1EnemyVariant } from "./games/amp-invaders/wave1SpriteRoster";
@@ -189,6 +191,7 @@ app.innerHTML = `
       <div class="stage-meta">
         <span id="hud-score">Stage: 0 • Total: 0</span>
         <span id="hud-grace" class="grace-indicator hidden">GRACE</span>
+        <span id="hud-lives" class="lives-indicator hidden">❤ ❤ ❤</span>
       </div>
       <button id="commit-btn" class="btn primary hidden">LOCK STAGE</button>
     </footer>
@@ -202,6 +205,7 @@ const hudTime = must(document.querySelector<HTMLDivElement>("#hud-time"), "Missi
 const hudStage = must(document.querySelector<HTMLDivElement>("#hud-stage"), "Missing hud stage");
 const hudScore = must(document.querySelector<HTMLSpanElement>("#hud-score"), "Missing hud score");
 const hudGrace = must(document.querySelector<HTMLSpanElement>("#hud-grace"), "Missing hud grace");
+const hudLives = must(document.querySelector<HTMLSpanElement>("#hud-lives"), "Missing hud lives");
 const commitBtn = must(document.querySelector<HTMLButtonElement>("#commit-btn"), "Missing commit button");
 
 const ctx = must(canvas.getContext("2d"), "2D canvas context unavailable");
@@ -445,6 +449,22 @@ function readSnakeAudioTelemetry(activeStage: StageRuntime): SnakeAudioTelemetry
   };
 }
 
+function readAmpInvadersLives(activeStage: StageRuntime): number | null {
+  if (activeStage.id !== "amp-invaders") {
+    return null;
+  }
+  const debug = activeStage.debugState();
+  if (!debug || typeof debug !== "object") {
+    return null;
+  }
+  const payload = debug as Record<string, unknown>;
+  const livesRaw = payload.lives;
+  if (typeof livesRaw !== "number" || !Number.isFinite(livesRaw)) {
+    return null;
+  }
+  return Math.max(0, Math.round(livesRaw));
+}
+
 function parseSnakeAudioState(value: unknown): SnakeAudioState | null {
   if (
     value === "intro" ||
@@ -566,6 +586,10 @@ function syncHud(): void {
   const compactHud = frameWidth <= 520;
   const summary = finalScoreSummary();
   const graceActive = mode === "playing" && (stage.isGraceActive?.() ?? false);
+  const canShowAmpLives =
+    stage.id === "amp-invaders" && (mode === "playing" || mode === "deathPause" || mode === "deathChoice");
+  const ampLives = canShowAmpLives ? readAmpInvadersLives(stage) : null;
+  const ampLivesText = ampLives === null ? "" : formatAmpLivesHearts(ampLives);
   hudTime.textContent = formatMs(leftMs);
   hudStage.textContent =
     mode === "results" || mode === "leaderboard"
@@ -581,6 +605,8 @@ function syncHud(): void {
       : `Stage: ${Math.round(flow.stageRaw)} • Total: ${totalBankedScore()}`;
   hudGrace.classList.toggle("hidden", !graceActive);
   hudGrace.textContent = graceActive ? "GRACE" : "";
+  hudLives.classList.toggle("hidden", ampLivesText.length === 0);
+  hudLives.textContent = ampLivesText;
 }
 
 function syncCommitButton(): void {
@@ -647,7 +673,7 @@ function syncOverlay(): void {
       : resultsCopy.submitCta;
     const emojiSplits = flow.bankedTri
       .map((value, idx) => {
-        const emoji = idx === 0 ? "🎸" : idx === 1 ? "👾" : "🚀";
+        const emoji = getStageIcon(idx);
         return `<li><span>${emoji}</span><strong>${Math.round(value)}</strong></li>`;
       })
       .join("");
@@ -872,14 +898,15 @@ async function submitCurrentRunScore(): Promise<void> {
   scoreSubmitPending = true;
   scoreSubmitError = "";
   writeStoredInitials(initials);
-  const submitted = await submitScore({
+  const submitResult = await submitScore({
     initials,
     total: summary.totalScore,
     splits
   });
   scoreSubmitPending = false;
-  if (!submitted) {
-    scoreSubmitError = "Submit failed. Try again.";
+  if (!submitResult.ok) {
+    scoreSubmitError = submitResult.message || "Submit failed. Try again.";
+    console.error("Leaderboard submit failed", submitResult);
     return;
   }
   audio.trigger("submit");
@@ -3839,6 +3866,15 @@ function injectStyles(): void {
         opacity: 0.26;
       }
     }
+    .lives-indicator {
+      align-self: end;
+      width: fit-content;
+      font-size: 11px;
+      line-height: 1;
+      letter-spacing: 0.14em;
+      color: #ff778f;
+      text-shadow: 0 0 8px rgba(255, 119, 143, 0.48);
+    }
     #hud-score {
       white-space: nowrap;
       overflow: hidden;
@@ -3868,13 +3904,16 @@ function injectStyles(): void {
     }
     .bonus-line {
       margin: -2px auto 0;
-      width: min(100%, 270px);
+      width: fit-content;
+      max-width: 100%;
       display: flex;
-      justify-content: space-between;
-      align-items: center;
+      justify-content: center;
+      align-items: baseline;
+      gap: 8px;
       font-size: 14px;
       letter-spacing: 0.04em;
       text-transform: uppercase;
+      text-align: center;
     }
     .bonus-line strong {
       color: var(--primary);

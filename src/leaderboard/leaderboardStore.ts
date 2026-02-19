@@ -10,12 +10,25 @@ type SubmitScoreInput = {
   splits: [number, number, number] | number[];
 };
 
+export type SubmitScoreResult =
+  | { ok: true }
+  | {
+      ok: false;
+      message: string;
+      status?: number;
+    };
+
 type ApiLeaderboardEntry = {
   initials: string;
   total: number;
   stage1: number;
   stage2: number;
   stage3: number;
+};
+
+type ApiErrorPayload = {
+  error?: unknown;
+  detail?: unknown;
 };
 
 const MAX_ENTRIES = 20;
@@ -137,16 +150,51 @@ export async function refreshScores(limit = API_LIMIT): Promise<LeaderboardEntry
   return topScores();
 }
 
-export async function submitScore(input: SubmitScoreInput): Promise<boolean> {
+function formatApiError(payload: ApiErrorPayload, status: number): string {
+  const error = typeof payload.error === "string" ? payload.error : "";
+  const detail = typeof payload.detail === "string" ? payload.detail : "";
+  if (error && detail) {
+    return `${error}: ${detail}`;
+  }
+  if (error) {
+    return error;
+  }
+  if (detail) {
+    return detail;
+  }
+  return `Submit failed (${status})`;
+}
+
+async function parseSubmitError(response: Response): Promise<SubmitScoreResult> {
+  const fallback = { ok: false as const, status: response.status, message: `Submit failed (${response.status})` };
+  try {
+    const payload = (await response.json()) as ApiErrorPayload;
+    return {
+      ok: false,
+      status: response.status,
+      message: formatApiError(payload, response.status)
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export async function submitScore(input: SubmitScoreInput): Promise<SubmitScoreResult> {
   hydrate();
   const initials = input.initials.toUpperCase();
   const [stage1, stage2, stage3] = normalizeSplits(input.splits);
   const total = Math.round(input.total);
   if (!/^[A-Z]{3}$/.test(initials) || total < 0) {
-    return false;
+    return {
+      ok: false,
+      message: "Invalid leaderboard payload"
+    };
   }
   if (typeof fetch !== "function") {
-    return false;
+    return {
+      ok: false,
+      message: "Leaderboard submit is unavailable in this environment"
+    };
   }
   const localEntry: LeaderboardEntry = {
     player: initials,
@@ -171,23 +219,29 @@ export async function submitScore(input: SubmitScoreInput): Promise<boolean> {
       if (response.status === 404 && isLocalDevHost()) {
         setEntries([localEntry, ...entries]);
         persist();
-        return true;
+        return { ok: true };
       }
-      return false;
+      return parseSubmitError(response);
     }
     const payload = (await response.json()) as { entry?: ApiLeaderboardEntry };
     if (!payload.entry) {
-      return false;
+      return {
+        ok: false,
+        message: "Leaderboard submit succeeded but response payload was invalid"
+      };
     }
     setEntries([mapApiEntry(payload.entry), ...entries]);
     persist();
-    return true;
+    return { ok: true };
   } catch {
     if (isLocalDevHost()) {
       setEntries([localEntry, ...entries]);
       persist();
-      return true;
+      return { ok: true };
     }
-    return false;
+    return {
+      ok: false,
+      message: "Network error while submitting score"
+    };
   }
 }

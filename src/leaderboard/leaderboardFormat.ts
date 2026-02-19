@@ -1,3 +1,5 @@
+import { getStageIcon } from "../domain/stageIcons";
+
 const KILO = 1000;
 
 export function sanitizeInitials(value: string): string {
@@ -31,5 +33,5 @@ export function formatEmojiLine(input: {
   total: number;
 }): string {
   const [stage1 = 0, stage2 = 0, stage3 = 0] = input.splits;
-  return `#${input.rank} ${input.initials} 🎸${formatCompactScore(stage1)} 👾${formatCompactScore(stage2)} 🚀${formatCompactScore(stage3)} Σ${formatCompactScore(input.total)}`;
+  return `#${input.rank} ${input.initials} ${getStageIcon(0)}${formatCompactScore(stage1)} ${getStageIcon(1)}${formatCompactScore(stage2)} ${getStageIcon(2)}${formatCompactScore(stage3)} Σ${formatCompactScore(input.total)}`;
 }

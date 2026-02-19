@@ -9,54 +9,149 @@ type LeaderboardRow = {
   created_at: string;
 };
 
-const connectionString =
-  process.env.POSTGRES_URL_NON_POOLING ??
-  process.env.POSTGRES_URL ??
-  process.env.POSTGRES_PRISMA_URL ??
-  process.env.DATABASE_URL;
+type JsonResponse = {
+  status: (code: number) => { json: (value: unknown) => void };
+};
+
+type RequestLike = {
+  method?: string;
+  query?: Record<string, string | string[]>;
+  body?: unknown;
+};
+
+type ConnectionSpec = {
+  value: string | null;
+  source: string | null;
+};
+
+const CONNECTION_ENV_KEYS = [
+  "POSTGRES_URL_NON_POOLING",
+  "POSTGRES_URL",
+  "POSTGRES_PRISMA_URL",
+  "DATABASE_URL",
+  "SUPABASE_DB_URL",
+  "SUPABASE_DATABASE_URL",
+  "SUPABASE_POSTGRES_URL",
+  "SUPABASE_POOLER_URL",
+  "SUPABASE_POOLER_TRANSACTION_URL"
+] as const;
+
+function resolveConnectionSpec(): ConnectionSpec {
+  for (const key of CONNECTION_ENV_KEYS) {
+    const value = process.env[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return {
+        value,
+        source: key
+      };
+    }
+  }
+  return {
+    value: null,
+    source: null
+  };
+}
+
+const connectionSpec = resolveConnectionSpec();
 
 let pool: Pool | null = null;
 let schemaReady = false;
 
-function getPool(): Pool {
-  if (!connectionString) {
-    throw new Error("Missing Postgres connection string");
+function shouldUseSsl(connectionString: string): boolean {
+  if (/sslmode=disable/i.test(connectionString)) {
+    return false;
   }
+  return !/(localhost|127\.0\.0\.1)/i.test(connectionString);
+}
+
+function getPool(): Pool {
+  if (!connectionSpec.value) {
+    throw new Error(
+      `Missing Postgres connection string. Configure one of: ${CONNECTION_ENV_KEYS.join(", ")}`
+    );
+  }
+
   if (!pool) {
-    pool = new Pool({
-      connectionString,
-      ssl: {
-        rejectUnauthorized: false
-      }
-    });
+    pool = new Pool(
+      shouldUseSsl(connectionSpec.value)
+        ? {
+            connectionString: connectionSpec.value,
+            ssl: {
+              rejectUnauthorized: false
+            }
+          }
+        : {
+            connectionString: connectionSpec.value
+          }
+    );
   }
   return pool;
+}
+
+function readQueryValue(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+  return value ?? "";
+}
+
+function isPermissionError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  return (error as { code?: unknown }).code === "42501";
+}
+
+function errorDetail(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "unknown_error";
+}
+
+async function leaderboardTableExists(db: Pool): Promise<boolean> {
+  const result = await db.query<{ table_name: string | null }>(
+    "select to_regclass('public.leaderboard_entries') as table_name"
+  );
+  return Boolean(result.rows[0]?.table_name);
 }
 
 async function ensureSchema(): Promise<void> {
   if (schemaReady) {
     return;
   }
+
   const db = getPool();
-  await db.query(`
-    create table if not exists public.leaderboard_entries (
-      id bigserial primary key,
-      initials char(3) not null,
-      total integer not null check (total >= 0),
-      stage1 integer not null check (stage1 >= 0),
-      stage2 integer not null check (stage2 >= 0),
-      stage3 integer not null check (stage3 >= 0),
-      created_at timestamptz not null default now()
-    );
-  `);
-  await db.query(`
-    create index if not exists leaderboard_entries_rank_idx
-      on public.leaderboard_entries (total desc, created_at asc);
-  `);
-  schemaReady = true;
+  try {
+    await db.query(`
+      create table if not exists public.leaderboard_entries (
+        id bigserial primary key,
+        initials char(3) not null,
+        total integer not null check (total >= 0),
+        stage1 integer not null check (stage1 >= 0),
+        stage2 integer not null check (stage2 >= 0),
+        stage3 integer not null check (stage3 >= 0),
+        created_at timestamptz not null default now()
+      );
+    `);
+    await db.query(`
+      create index if not exists leaderboard_entries_rank_idx
+        on public.leaderboard_entries (total desc, created_at asc);
+    `);
+    schemaReady = true;
+  } catch (error) {
+    if (isPermissionError(error) && (await leaderboardTableExists(db))) {
+      schemaReady = true;
+      console.warn(
+        "[leaderboard] schema setup skipped due permissions; existing table will be used"
+      );
+      return;
+    }
+    throw error;
+  }
 }
 
-function sendJson(res: { status: (code: number) => { json: (value: unknown) => void } }, status: number, value: unknown): void {
+function sendJson(res: JsonResponse, status: number, value: unknown): void {
   res.status(status).json(value);
 }
 
@@ -102,36 +197,87 @@ function parseBody(body: unknown): Record<string, unknown> {
   return {};
 }
 
-export default async function handler(
-  req: { method?: string; query?: Record<string, string | string[]>; body?: unknown },
-  res: { status: (code: number) => { json: (value: unknown) => void } }
-): Promise<void> {
+function buildStorageUnavailablePayload(error: unknown): Record<string, unknown> {
+  return {
+    error: "Leaderboard storage unavailable",
+    detail: errorDetail(error),
+    connectionSource: connectionSpec.source,
+    hint: `Configure one of: ${CONNECTION_ENV_KEYS.join(", ")}`
+  };
+}
+
+async function sendDebugSnapshot(res: JsonResponse): Promise<void> {
+  const configured = Boolean(connectionSpec.value);
+  if (!configured) {
+    sendJson(res, 200, {
+      ok: false,
+      connectionConfigured: false,
+      connectionSource: null,
+      schemaReady,
+      hint: `Configure one of: ${CONNECTION_ENV_KEYS.join(", ")}`
+    });
+    return;
+  }
+
+  try {
+    const db = getPool();
+    const pingResult = await db.query<{ ok: number }>("select 1 as ok");
+    const tableExists = await leaderboardTableExists(db);
+    sendJson(res, 200, {
+      ok: true,
+      connectionConfigured: true,
+      connectionSource: connectionSpec.source,
+      schemaReady,
+      pingOk: pingResult.rows[0]?.ok === 1,
+      tableExists
+    });
+  } catch (error) {
+    sendJson(res, 200, {
+      ok: false,
+      connectionConfigured: true,
+      connectionSource: connectionSpec.source,
+      schemaReady,
+      detail: errorDetail(error)
+    });
+  }
+}
+
+export default async function handler(req: RequestLike, res: JsonResponse): Promise<void> {
+  if (req.method === "GET" && readQueryValue(req.query?.debug) === "1") {
+    await sendDebugSnapshot(res);
+    return;
+  }
+
   try {
     await ensureSchema();
   } catch (error) {
-    sendJson(res, 500, {
-      error: "Leaderboard storage unavailable",
-      detail: error instanceof Error ? error.message : "unknown_error"
-    });
+    console.error("[leaderboard] storage unavailable", error);
+    sendJson(res, 503, buildStorageUnavailablePayload(error));
     return;
   }
 
   const db = getPool();
 
   if (req.method === "GET") {
-    const limitParam = req.query?.limit;
-    const limitValue = Array.isArray(limitParam) ? limitParam[0] : limitParam;
-    const parsed = parseNonNegativeInt(limitValue ?? 200);
+    const parsed = parseNonNegativeInt(readQueryValue(req.query?.limit) || 200);
     const limit = Math.max(1, Math.min(500, parsed ?? 200));
 
-    const result = await db.query<LeaderboardRow>(
-      `select initials, total, stage1, stage2, stage3, created_at
-       from public.leaderboard_entries
-       order by total desc, created_at asc
-       limit $1`,
-      [limit]
-    );
-    sendJson(res, 200, { entries: result.rows });
+    try {
+      const result = await db.query<LeaderboardRow>(
+        `select initials, total, stage1, stage2, stage3, created_at
+         from public.leaderboard_entries
+         order by total desc, created_at asc
+         limit $1`,
+        [limit]
+      );
+      sendJson(res, 200, { entries: result.rows });
+    } catch (error) {
+      console.error("[leaderboard] read failed", error);
+      sendJson(res, 500, {
+        error: "Leaderboard read failed",
+        detail: errorDetail(error)
+      });
+    }
     return;
   }
 
@@ -148,16 +294,24 @@ export default async function handler(
       return;
     }
 
-    const result = await db.query<LeaderboardRow>(
-      `insert into public.leaderboard_entries (initials, total, stage1, stage2, stage3)
-       values ($1, $2, $3, $4, $5)
-       returning initials, total, stage1, stage2, stage3, created_at`,
-      [initials, total, stage1, stage2, stage3]
-    );
+    try {
+      const result = await db.query<LeaderboardRow>(
+        `insert into public.leaderboard_entries (initials, total, stage1, stage2, stage3)
+         values ($1, $2, $3, $4, $5)
+         returning initials, total, stage1, stage2, stage3, created_at`,
+        [initials, total, stage1, stage2, stage3]
+      );
 
-    sendJson(res, 201, {
-      entry: result.rows[0]
-    });
+      sendJson(res, 201, {
+        entry: result.rows[0]
+      });
+    } catch (error) {
+      console.error("[leaderboard] submit failed", error);
+      sendJson(res, 500, {
+        error: "Leaderboard submit failed",
+        detail: errorDetail(error)
+      });
+    }
     return;
   }
 

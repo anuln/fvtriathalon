@@ -34,6 +34,6 @@ describe("leaderboard format", () => {
         splits: [1200, 950, 10400],
         total: 12_550
       })
-    ).toBe("#7 ABC 🎸1.2k 👾950 🚀10k Σ13k");
+    ).toBe("#7 ABC 🐍1.2k 🟡950 🚀10k Σ13k");
   });
 });

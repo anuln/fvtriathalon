@@ -74,12 +74,37 @@ describe("leaderboard store", () => {
 
     const submitted = await submitScore({ initials: "abc", splits: [1200, 1500, 1800], total: 4500 });
 
-    expect(submitted).toBe(true);
+    expect(submitted.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/leaderboard",
       expect.objectContaining({ method: "POST" })
     );
     expect(topScores()[0]?.player).toBe("ABC");
+  });
+
+  it("surfaces api error detail when submit fails", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        error: "Leaderboard storage unavailable",
+        detail: "Missing Postgres connection string"
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { submitScore } = await import("../../src/leaderboard/leaderboardStore");
+    const submitted = await submitScore({
+      initials: "abc",
+      splits: [1200, 1500, 1800],
+      total: 4500
+    });
+
+    expect(submitted).toEqual({
+      ok: false,
+      message: "Leaderboard storage unavailable: Missing Postgres connection string",
+      status: 503
+    });
   });
 
   it("falls back to local cache in localhost dev when api route is unavailable", async () => {
@@ -97,7 +122,7 @@ describe("leaderboard store", () => {
       total: 600
     });
 
-    expect(submitted).toBe(true);
+    expect(submitted.ok).toBe(true);
     expect(topScores()[0]).toEqual({
       player: "DEV",
       total: 600,
