@@ -12,6 +12,7 @@ type AdvanceSample = {
   snakeLength: number;
   scoreRate: number;
   pickupDensity: number;
+  elapsedSeconds?: number;
   danger: boolean;
   comboMilestoneRecent: boolean;
   hasPositiveMomentum: boolean;
@@ -175,6 +176,35 @@ describe("createSnakeAudioDirector", () => {
     });
 
     expect(blocked.state).toBe("hype");
+  });
+
+  it("reaches flow by 2.5 minutes under steady strong play", () => {
+    const director = createSnakeAudioDirector();
+    let flowAtSeconds: number | null = null;
+    const sampleBase: AdvanceSample = {
+      score: 500,
+      combo: 7,
+      snakeLength: 10,
+      scoreRate: 26,
+      pickupDensity: 0.45,
+      danger: false,
+      comboMilestoneRecent: false,
+      hasPositiveMomentum: true
+    };
+
+    for (let step16 = 0; step16 <= 1280; step16 += 128) {
+      const elapsed = stepBoundary(step16);
+      const result = feedBoundary(director, step16, {
+        ...sampleBase,
+        elapsedSeconds: elapsed
+      });
+      if (result.state === "flow" && flowAtSeconds === null) {
+        flowAtSeconds = elapsed;
+      }
+    }
+
+    expect(flowAtSeconds).not.toBeNull();
+    expect(flowAtSeconds ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(150);
   });
 });
 

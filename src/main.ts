@@ -525,6 +525,7 @@ function tick(dtMs: number): void {
     active: runActive && (mode === "playing" || mode === "deathPause" || mode === "deathChoice"),
     stage: STAGE_IDS[flow.currentStageIndex] ?? "rhythm-serpent",
     score: flow.stageRaw,
+    stageElapsedMs: flow.elapsedInStageMs,
     danger: mode === "deathPause" || mode === "deathChoice",
     snakeTelemetry: readSnakeAudioTelemetry(stage)
   });
@@ -4132,6 +4133,7 @@ type AudioUpdateInput = {
   active: boolean;
   stage: StageId;
   score: number;
+  stageElapsedMs: number;
   danger: boolean;
   snakeTelemetry: SnakeAudioTelemetry | null;
 };
@@ -4610,6 +4612,7 @@ function createAudioEngine() {
           snakeLength: snakeLastLength,
           scoreRate: snakeScoreRate,
           pickupDensity,
+          elapsedSeconds: Math.max(0, input.stageElapsedMs / 1000),
           danger: input.danger,
           comboMilestoneRecent: time - snakeComboMilestoneAt <= 10,
           hasPositiveMomentum: snakeScoreRate >= 18

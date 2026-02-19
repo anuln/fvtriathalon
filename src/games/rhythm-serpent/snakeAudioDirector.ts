@@ -14,6 +14,7 @@ export type SnakeAudioAdvanceSample = {
   snakeLength: number;
   scoreRate: number;
   pickupDensity: number;
+  elapsedSeconds?: number;
   danger: boolean;
   comboMilestoneRecent: boolean;
   hasPositiveMomentum: boolean;
@@ -44,13 +45,13 @@ export type ResolveSnakePhaseVisualInput = {
 };
 
 const EIGHT_BARS_STEP16 = 128;
-const DROP_ENERGY_THRESHOLD = 0.78;
+const DROP_ENERGY_THRESHOLD = 0.64;
 const DROP_ENERGY_BARS_REQUIRED = 2;
-const DANGER_SHOCK_SECONDS = 6;
+const DANGER_SHOCK_SECONDS = 3;
 const STAGE_THRESHOLDS: Record<"build" | "vibe" | "hype", number> = {
-  build: 0.22,
-  vibe: 0.38,
-  hype: 0.58
+  build: 0.16,
+  vibe: 0.29,
+  hype: 0.44
 };
 
 const V2_PHASE_VISUALS: Record<SnakeAudioState, SnakePhaseVisual> = {
@@ -78,16 +79,23 @@ function stateRank(state: SnakeAudioState): number {
 }
 
 function energyIndex(sample: SnakeAudioAdvanceSample): number {
-  const scoreNorm = clamp(0, sample.score / 1200, 1);
-  const comboNorm = clamp(0, sample.combo / 10, 1);
-  const lengthNorm = clamp(0, (sample.snakeLength - 3) / 15, 1);
-  const scoreRateNorm = clamp(0, sample.scoreRate / 60, 1);
+  const scoreNorm = clamp(0, sample.score / 900, 1);
+  const comboNorm = clamp(0, sample.combo / 8, 1);
+  const lengthNorm = clamp(0, (sample.snakeLength - 3) / 12, 1);
+  const scoreRateNorm = clamp(0, sample.scoreRate / 48, 1);
   const pickupNorm = clamp(0, sample.pickupDensity, 1);
-  const dangerPenalty = sample.danger ? 0.25 : 0;
+  const elapsedNorm = clamp(0, (sample.elapsedSeconds ?? 0) / 150, 1);
+  const dangerPenalty = sample.danger ? 0.18 : 0;
 
   return clamp(
     0,
-    comboNorm * 0.35 + scoreRateNorm * 0.25 + lengthNorm * 0.2 + pickupNorm * 0.1 + scoreNorm * 0.1 - dangerPenalty,
+    comboNorm * 0.28 +
+      scoreRateNorm * 0.22 +
+      lengthNorm * 0.17 +
+      pickupNorm * 0.09 +
+      scoreNorm * 0.08 +
+      elapsedNorm * 0.16 -
+      dangerPenalty,
     1
   );
 }
@@ -180,10 +188,15 @@ export function createSnakeAudioDirector() {
             } else {
               highEnergyBars = 0;
             }
+            const comboGate =
+              input.sample.comboMilestoneRecent ||
+              input.sample.combo >= 6 ||
+              input.sample.pickupDensity >= 0.55;
+            const momentumGate = input.sample.hasPositiveMomentum || input.sample.scoreRate >= 22;
             const dropReady =
               highEnergyBars >= DROP_ENERGY_BARS_REQUIRED &&
-              input.sample.comboMilestoneRecent &&
-              input.sample.hasPositiveMomentum &&
+              comboGate &&
+              momentumGate &&
               !dangerShockActive;
             if (dropReady) {
               transitionEvent = transition("drop");
