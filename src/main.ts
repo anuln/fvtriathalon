@@ -82,6 +82,7 @@ import {
 type StageId = "rhythm-serpent" | "moshpit-pacman" | "amp-invaders";
 type Dir = "up" | "down" | "left" | "right";
 type Mode =
+  | "desktopGate"
   | "boot"
   | "playing"
   | "deathPause"
@@ -125,13 +126,20 @@ type StageRuntime = {
 
 const STAGE_IDS: StageId[] = ["rhythm-serpent", "moshpit-pacman", "amp-invaders"];
 const STAGE_NAMES = ["Rhythm Serpent", "Mosh Pit Pac-Man", "Amp Invaders"];
-const RUN_TOTAL_MS = resolveRunTotalMs(window.location.search);
+const URL_QUERY = window.location.search;
+const URL_PARAMS = new URLSearchParams(URL_QUERY);
+const RUN_TOTAL_MS = resolveRunTotalMs(URL_QUERY);
 const THEME_OVERRIDE_KEY = "festiverse.theme.override";
 const THEME_CYCLE_KEY = "festiverse.theme.cycle";
 const THEME_CYCLE_INDEX_KEY = "festiverse.theme.cycle.index";
 const INITIALS_STORAGE_KEY = "festiverse.v1.initials";
-const SNAKE_AUDIO_MODE = resolveSnakeAudioMode(window.location.search, "v2");
-const FORCE_GUITAR_SOLO_POWER = new URLSearchParams(window.location.search).get("forceGuitarSoloPower") === "1";
+const SNAKE_AUDIO_MODE = resolveSnakeAudioMode(URL_QUERY, "v2");
+const FORCE_GUITAR_SOLO_POWER = URL_PARAMS.get("forceGuitarSoloPower") === "1";
+const MOBILE_PLAY_URL = "https://fvtriathalon.vercel.app/";
+const DESKTOP_GATE_BYPASS_PARAM = "desktop";
+const DESKTOP_GATE_FORCE_PARAM = "forceDesktopGate";
+const DESKTOP_GATE_QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=0&data=${encodeURIComponent(MOBILE_PLAY_URL)}`;
+const DESKTOP_GATE_ACTIVE = shouldShowDesktopGate();
 const GUITAR_SOLO_SFX_URL = new URL("../assets/audio/lyria2/oneshot_guitar_solo.wav", import.meta.url).href;
 const GUITAR_SOLO_SPRITE_URL = new URL("../assets/sprites/rhythm-serpent-guitar-solo.png", import.meta.url).href;
 const AMP_WAVE1_ENEMY_BASELINE_URL = new URL("../assets/sprites/generated/wave1_enemy_test-transparent.png", import.meta.url).href;
@@ -155,6 +163,28 @@ function createOptionalImage(src: string): HTMLImageElement {
   const image = new Image();
   image.src = src;
   return image;
+}
+
+function isLocalHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+function shouldShowDesktopGate(): boolean {
+  if (URL_PARAMS.get(DESKTOP_GATE_FORCE_PARAM) === "1") {
+    return true;
+  }
+  if (URL_PARAMS.get(DESKTOP_GATE_BYPASS_PARAM) === "1") {
+    return false;
+  }
+  if (isLocalHost(window.location.hostname)) {
+    return false;
+  }
+
+  const ua = navigator.userAgent ?? "";
+  const mobileUa = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua);
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+  const smallViewport = window.matchMedia?.("(max-width: 900px)").matches ?? window.innerWidth <= 900;
+  return !(mobileUa || (coarsePointer && smallViewport));
 }
 
 function readStoredInitials(): string {
@@ -201,6 +231,11 @@ app.innerHTML = `
   </div>
 `;
 
+const triRoot = must(document.querySelector<HTMLDivElement>(".tri-root"), "Missing tri root");
+if (DESKTOP_GATE_ACTIVE) {
+  triRoot.classList.add("desktop-gate");
+}
+
 const canvas = must(document.querySelector<HTMLCanvasElement>("#game-canvas"), "Missing game canvas");
 const overlay = must(document.querySelector<HTMLDivElement>("#overlay"), "Missing overlay container");
 const adminPanel = must(document.querySelector<HTMLDivElement>("#admin-panel"), "Missing admin panel");
@@ -219,7 +254,7 @@ applyTheme(activeTheme);
 const audio = createAudioEngine();
 
 let flow: FlowState = createFlowState();
-let mode: Mode = "boot";
+let mode: Mode = DESKTOP_GATE_ACTIVE ? "desktopGate" : "boot";
 let runActive = false;
 let globalElapsedMs = 0;
 let stageAttemptStartMs = 0;
@@ -417,7 +452,7 @@ adminPanel.addEventListener("click", (event) => {
   }
 });
 
-if (new URLSearchParams(window.location.search).get("adminThemeLab") === "1") {
+if (URL_PARAMS.get("adminThemeLab") === "1") {
   toggleAdminPanel(true);
 }
 
@@ -614,19 +649,25 @@ function syncHud(): void {
   const ampLives = canShowAmpLives ? readAmpInvadersLives(stage) : null;
   const ampLivesText = ampLives === null ? "" : formatAmpLivesHearts(ampLives);
   const livesText = ampLivesText || moshPitLifeText;
-  hudTime.textContent = formatMs(leftMs);
-  hudStage.textContent =
-    mode === "results" || mode === "leaderboard"
-      ? compactHud
-        ? "Complete"
-        : "Run Complete"
-      : compactHud
-      ? `S${flow.currentStageIndex + 1}/3`
-      : `Stage ${flow.currentStageIndex + 1}/3`;
-  hudScore.textContent =
-    mode === "results" || mode === "leaderboard"
-      ? `Set Total: ${summary.baseScore} • Final: ${summary.totalScore}`
-      : `Stage: ${Math.round(flow.stageRaw)} • Total: ${totalBankedScore()}`;
+  if (mode === "desktopGate") {
+    hudTime.textContent = "MOBILE";
+    hudStage.textContent = compactHud ? "ONLY" : "Mobile Only";
+    hudScore.textContent = "Scan QR to play";
+  } else {
+    hudTime.textContent = formatMs(leftMs);
+    hudStage.textContent =
+      mode === "results" || mode === "leaderboard"
+        ? compactHud
+          ? "Complete"
+          : "Run Complete"
+        : compactHud
+        ? `S${flow.currentStageIndex + 1}/3`
+        : `Stage ${flow.currentStageIndex + 1}/3`;
+    hudScore.textContent =
+      mode === "results" || mode === "leaderboard"
+        ? `Set Total: ${summary.baseScore} • Final: ${summary.totalScore}`
+        : `Stage: ${Math.round(flow.stageRaw)} • Total: ${totalBankedScore()}`;
+  }
   hudGrace.classList.toggle("hidden", !graceActive);
   hudGrace.textContent = graceActive ? "GRACE" : "";
   hudLives.classList.toggle("hidden", livesText.length === 0);
@@ -641,7 +682,25 @@ function syncCommitButton(): void {
 function syncOverlay(): void {
   let markup = "";
 
-  if (mode === "boot") {
+  if (mode === "desktopGate") {
+    const showDevHint = isLocalHost(window.location.hostname);
+    markup = `
+      <div class="card desktop-gate-card">
+        <h1>PLAY ON MOBILE</h1>
+        <p>Festiverse Arcade Triathlon is tuned for touch and phone audio.</p>
+        <div class="desktop-gate-basics">
+          <span>${getStageIcon(0)} Stage 1</span>
+          <span>${getStageIcon(1)} Stage 2</span>
+          <span>${getStageIcon(2)} Stage 3</span>
+          <span>${getTotalScoreIcon()} Total</span>
+        </div>
+        <img class="desktop-gate-qr" src="${DESKTOP_GATE_QR_URL}" alt="QR code to open Festiverse Arcade Triathlon on mobile" />
+        <a class="btn primary desktop-gate-link" href="${MOBILE_PLAY_URL}" target="_blank" rel="noreferrer">OPEN ON YOUR PHONE</a>
+        <p class="desktop-gate-url">${MOBILE_PLAY_URL}</p>
+        ${showDevHint ? `<small class="muted">Desktop dev bypass: ?${DESKTOP_GATE_BYPASS_PARAM}=1</small>` : ""}
+      </div>
+    `;
+  } else if (mode === "boot") {
     markup = `
       <div class="card attract" data-secret-hold="true">
         <h1 class="title-stack"><span>${bootCopy.titleTop}</span><span>${bootCopy.titleBottom}</span></h1>
@@ -3763,6 +3822,24 @@ function injectStyles(): void {
         radial-gradient(circle at 80% 15%, rgba(0, 231, 212, 0.15), transparent 44%),
         var(--bg);
     }
+    .tri-root.desktop-gate {
+      grid-template-rows: minmax(0, 1fr);
+    }
+    .tri-root.desktop-gate .hud,
+    .tri-root.desktop-gate .action-rail,
+    .tri-root.desktop-gate #game-canvas,
+    .tri-root.desktop-gate #admin-panel {
+      display: none !important;
+    }
+    .tri-root.desktop-gate .canvas-wrap {
+      border: 0;
+      background: radial-gradient(circle at 16% 12%, rgba(0, 231, 212, 0.14), transparent 40%),
+        radial-gradient(circle at 86% 18%, rgba(255, 90, 54, 0.14), transparent 42%),
+        linear-gradient(180deg, #090713, #06030d);
+    }
+    .tri-root.desktop-gate .overlay {
+      padding: 16px;
+    }
     .hud {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -3840,6 +3917,50 @@ function injectStyles(): void {
       display: grid;
       gap: 10px;
       padding: 26px 24px 22px;
+    }
+    .desktop-gate-card {
+      display: grid;
+      gap: 12px;
+      padding: 26px 24px;
+      width: min(92vw, 560px);
+    }
+    .desktop-gate-basics {
+      width: min(100%, 340px);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .desktop-gate-basics span {
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 999px;
+      padding: 6px 8px;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      background: rgba(12, 14, 30, 0.6);
+    }
+    .desktop-gate-qr {
+      width: min(62vw, 220px);
+      height: auto;
+      margin: 2px auto 0;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: #fff;
+      padding: 8px;
+    }
+    .desktop-gate-link {
+      text-decoration: none;
+      justify-self: center;
+      min-width: 220px;
+    }
+    .desktop-gate-url {
+      margin: 0;
+      font-size: 12px;
+      font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
+      color: rgba(196, 253, 255, 0.9);
+      word-break: break-all;
+      opacity: 0.9;
     }
     .transition-card {
       display: grid;
