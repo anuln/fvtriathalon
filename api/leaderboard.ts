@@ -64,6 +64,19 @@ function shouldUseSsl(connectionString: string): boolean {
   return !/(localhost|127\.0\.0\.1)/i.test(connectionString);
 }
 
+function normalizeSslConnectionString(connectionString: string): string {
+  try {
+    const normalized = new URL(connectionString);
+    normalized.searchParams.set("sslmode", "no-verify");
+    normalized.searchParams.delete("sslcert");
+    normalized.searchParams.delete("sslkey");
+    normalized.searchParams.delete("sslrootcert");
+    return normalized.toString();
+  } catch {
+    return connectionString;
+  }
+}
+
 function getPool(): Pool {
   if (!connectionSpec.value) {
     throw new Error(
@@ -71,17 +84,22 @@ function getPool(): Pool {
     );
   }
 
+  const useSsl = shouldUseSsl(connectionSpec.value);
+  const connectionString = useSsl
+    ? normalizeSslConnectionString(connectionSpec.value)
+    : connectionSpec.value;
+
   if (!pool) {
     pool = new Pool(
-      shouldUseSsl(connectionSpec.value)
+      useSsl
         ? {
-            connectionString: connectionSpec.value,
+            connectionString,
             ssl: {
               rejectUnauthorized: false
             }
           }
         : {
-            connectionString: connectionSpec.value
+            connectionString
           }
     );
   }
@@ -198,10 +216,16 @@ function parseBody(body: unknown): Record<string, unknown> {
 }
 
 function buildStorageUnavailablePayload(error: unknown): Record<string, unknown> {
+  const tlsMode = connectionSpec.value
+    ? shouldUseSsl(connectionSpec.value)
+      ? "sslmode=no-verify"
+      : "ssl-disabled"
+    : "not-configured";
   return {
     error: "Leaderboard storage unavailable",
     detail: errorDetail(error),
     connectionSource: connectionSpec.source,
+    tlsMode,
     hint: `Configure one of: ${CONNECTION_ENV_KEYS.join(", ")}`
   };
 }
@@ -213,6 +237,7 @@ async function sendDebugSnapshot(res: JsonResponse): Promise<void> {
       ok: false,
       connectionConfigured: false,
       connectionSource: null,
+      tlsMode: "not-configured",
       schemaReady,
       hint: `Configure one of: ${CONNECTION_ENV_KEYS.join(", ")}`
     });
@@ -227,6 +252,7 @@ async function sendDebugSnapshot(res: JsonResponse): Promise<void> {
       ok: true,
       connectionConfigured: true,
       connectionSource: connectionSpec.source,
+      tlsMode: shouldUseSsl(connectionSpec.value) ? "sslmode=no-verify" : "ssl-disabled",
       schemaReady,
       pingOk: pingResult.rows[0]?.ok === 1,
       tableExists
@@ -236,6 +262,7 @@ async function sendDebugSnapshot(res: JsonResponse): Promise<void> {
       ok: false,
       connectionConfigured: true,
       connectionSource: connectionSpec.source,
+      tlsMode: shouldUseSsl(connectionSpec.value) ? "sslmode=no-verify" : "ssl-disabled",
       schemaReady,
       detail: errorDetail(error)
     });

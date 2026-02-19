@@ -88,9 +88,9 @@ export const STAGE3_V2_DEFAULT_CONFIG: Stage3V2Config = {
     entryWave: 4,
     maxHp: 220,
     phases: [
-      { phase: 1, hpThreshold: 0.7, telegraphMs: 850, attackCooldownMs: 1500, burstCount: 2 },
-      { phase: 2, hpThreshold: 0.35, telegraphMs: 720, attackCooldownMs: 1220, burstCount: 3 },
-      { phase: 3, hpThreshold: 0, telegraphMs: 620, attackCooldownMs: 980, burstCount: 4 }
+      { phase: 1, hpThreshold: 0.7, telegraphMs: 900, attackCooldownMs: 1680, burstCount: 2 },
+      { phase: 2, hpThreshold: 0.35, telegraphMs: 700, attackCooldownMs: 1120, burstCount: 3 },
+      { phase: 3, hpThreshold: 0, telegraphMs: 560, attackCooldownMs: 780, burstCount: 5 }
     ]
   }
 };

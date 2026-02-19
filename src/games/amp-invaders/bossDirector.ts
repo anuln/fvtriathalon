@@ -1,10 +1,11 @@
 import { type Stage3V2Config, getBossPhaseSpec } from "./stage3v2Config";
 
-export type BossAttackPattern = "sweep" | "volley" | "enrageBurst";
+export type BossAttackPattern = "sweep" | "volley" | "enrageBurst" | "verticalLaser" | "seekerSwarm";
 
 export type BossEvent = {
   attackFired: boolean;
   pattern: BossAttackPattern | null;
+  phase: 1 | 2 | 3 | null;
 };
 
 export type BossState = {
@@ -14,6 +15,7 @@ export type BossState = {
   maxHp: number;
   phase: 1 | 2 | 3;
   telegraphActive: boolean;
+  telegraphPattern: BossAttackPattern | null;
   attackTimerMs: number;
   totalAttacks: number;
   lastAttackPattern: BossAttackPattern | null;
@@ -46,15 +48,23 @@ export function createBossDirector(config: Stage3V2Config): {
     maxHp: config.boss.maxHp,
     phase: 1,
     telegraphActive: false,
+    telegraphPattern: null,
     attackTimerMs: getBossPhaseSpec(config, 1).attackCooldownMs,
     totalAttacks: 0,
     lastAttackPattern: null
   };
 
-  function attackPatternForPhase(phase: 1 | 2 | 3): BossAttackPattern {
-    if (phase === 1) return "sweep";
-    if (phase === 2) return "volley";
-    return "enrageBurst";
+  function attackPatternForPhase(phase: 1 | 2 | 3, attackIndex: number): BossAttackPattern {
+    if (phase === 1) {
+      const phase1Sequence: BossAttackPattern[] = ["sweep", "volley", "sweep"];
+      return phase1Sequence[((attackIndex % phase1Sequence.length) + phase1Sequence.length) % phase1Sequence.length] ?? "sweep";
+    }
+    if (phase === 2) {
+      const phase2Sequence: BossAttackPattern[] = ["volley", "verticalLaser", "seekerSwarm", "volley"];
+      return phase2Sequence[((attackIndex % phase2Sequence.length) + phase2Sequence.length) % phase2Sequence.length] ?? "volley";
+    }
+    const phase3Sequence: BossAttackPattern[] = ["verticalLaser", "enrageBurst", "seekerSwarm", "enrageBurst", "verticalLaser"];
+    return phase3Sequence[((attackIndex % phase3Sequence.length) + phase3Sequence.length) % phase3Sequence.length] ?? "enrageBurst";
   }
 
   return {
@@ -66,6 +76,7 @@ export function createBossDirector(config: Stage3V2Config): {
         hp: config.boss.maxHp,
         phase: 1,
         telegraphActive: false,
+        telegraphPattern: null,
         attackTimerMs: getBossPhaseSpec(config, 1).attackCooldownMs,
         lastAttackPattern: null,
         totalAttacks: 0
@@ -73,26 +84,29 @@ export function createBossDirector(config: Stage3V2Config): {
     },
     update(dtMs: number) {
       if (!state.active || state.defeated) {
-        return { attackFired: false, pattern: null };
+        return { attackFired: false, pattern: null, phase: null };
       }
 
       const phaseSpec = getBossPhaseSpec(config, state.phase);
+      const pendingPattern = attackPatternForPhase(state.phase, state.totalAttacks);
       state.attackTimerMs -= dtMs;
 
       if (state.attackTimerMs <= phaseSpec.telegraphMs) {
         state.telegraphActive = true;
+        state.telegraphPattern = pendingPattern;
       }
 
       if (state.attackTimerMs > 0) {
-        return { attackFired: false, pattern: null };
+        return { attackFired: false, pattern: null, phase: null };
       }
 
-      const pattern = attackPatternForPhase(state.phase);
+      const pattern = pendingPattern;
       state.totalAttacks += 1;
       state.lastAttackPattern = pattern;
       state.telegraphActive = false;
+      state.telegraphPattern = null;
       state.attackTimerMs = getBossPhaseSpec(config, state.phase).attackCooldownMs;
-      return { attackFired: true, pattern };
+      return { attackFired: true, pattern, phase: state.phase };
     },
     applyDamage(damage: number) {
       if (!state.active || state.defeated) {
@@ -103,6 +117,7 @@ export function createBossDirector(config: Stage3V2Config): {
       if (state.hp <= 0) {
         state.defeated = true;
         state.active = false;
+        state.telegraphPattern = null;
       }
     },
     getState() {

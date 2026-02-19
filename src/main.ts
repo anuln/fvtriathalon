@@ -40,6 +40,7 @@ import {
 import { createWaveDirectorV2 } from "./games/amp-invaders/waveDirectorV2";
 import { createEnemyDirector } from "./games/amp-invaders/enemyDirector";
 import { createBossDirector } from "./games/amp-invaders/bossDirector";
+import { getBossLaserColumns, planBossProjectiles } from "./games/amp-invaders/bossAttackPlanner";
 import { computeEnemyDropDelta, getEnemyInvasionFloorY } from "./games/amp-invaders/invasionBounds";
 import { formatAmpLivesHearts } from "./games/amp-invaders/livesHud";
 import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specials";
@@ -2291,7 +2292,16 @@ function createAmpInvadersStage(): StageRuntime {
     alive: boolean;
     spriteVariant: EnemySpriteVariant | null;
   };
-  type Bullet = { x: number; y: number; vx: number; vy: number; damage: number; enemy: boolean };
+  type Bullet = {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    damage: number;
+    enemy: boolean;
+    kind?: "standard" | "laser" | "seeker";
+    steerStrength?: number;
+  };
   const AMP_WAVE2_ENEMY_VARIANT1_URL = new URL("../assets/sprites/generated/wave2_enemy_variant1_test-transparent.png", import.meta.url).href;
   const AMP_WAVE2_ENEMY_VARIANT2_URL = new URL("../assets/sprites/generated/wave2_enemy_variant2_test-transparent.png", import.meta.url).href;
   const AMP_WAVE2_ENEMY_VARIANT3_URL = new URL("../assets/sprites/generated/wave2_enemy_variant3_test-transparent.png", import.meta.url).href;
@@ -2507,26 +2517,31 @@ function createAmpInvadersStage(): StageRuntime {
     return spawned.length;
   }
 
-  function spawnBossAttack(pattern: "sweep" | "volley" | "enrageBurst", width: number): number {
-    const spawned: Bullet[] = [];
-    if (pattern === "sweep") {
-      const vxList = [-220, -120, 0, 120, 220];
-      for (const vx of vxList) {
-        spawned.push({ x: bossX, y: bossY + 28, vx, vy: 320 + Math.abs(vx) * 0.2, damage: 1, enemy: true });
-      }
-    } else if (pattern === "volley") {
-      const aimDx = playerX * width - bossX;
-      const clampedAim = Math.max(-160, Math.min(160, aimDx * 0.6));
-      const vxList = [clampedAim - 90, clampedAim, clampedAim + 90];
-      for (const vx of vxList) {
-        spawned.push({ x: bossX, y: bossY + 28, vx, vy: 350, damage: 1, enemy: true });
-      }
-    } else {
-      const vxList = [-260, -170, -90, 0, 90, 170, 260];
-      for (const vx of vxList) {
-        spawned.push({ x: bossX, y: bossY + 28, vx, vy: 360 + Math.abs(vx) * 0.18, damage: 1, enemy: true });
-      }
-    }
+  function spawnBossAttack(
+    pattern: "sweep" | "volley" | "enrageBurst" | "verticalLaser" | "seekerSwarm",
+    phase: 1 | 2 | 3,
+    width: number,
+    height: number
+  ): number {
+    const planned = planBossProjectiles({
+      pattern,
+      phase,
+      width,
+      height,
+      bossX,
+      bossY,
+      playerX: playerX * width
+    });
+    const spawned: Bullet[] = planned.map((item) => ({
+      x: item.x,
+      y: item.y,
+      vx: item.vx,
+      vy: item.vy,
+      damage: item.damage,
+      enemy: true,
+      kind: item.kind,
+      steerStrength: item.kind === "seeker" ? (phase >= 3 ? 1.45 : 1.05) : undefined
+    }));
     bullets.push(...spawned);
     return spawned.length;
   }
@@ -2644,6 +2659,8 @@ function createAmpInvadersStage(): StageRuntime {
           enemy.x += enemyDir * enemySpeed * (dtMs / 1000);
         });
       } else {
+        const bossState = bossDirector.getState();
+        bossSpeed = bossState.phase === 1 ? 82 : bossState.phase === 2 ? 106 : 132;
         const bossPad = Math.max(96, width * 0.14);
         bossX += bossDir * bossSpeed * (dtMs / 1000);
         if (bossX < bossPad) {
@@ -2672,8 +2689,8 @@ function createAmpInvadersStage(): StageRuntime {
         }
       } else if (inBoss) {
         const event = bossDirector.update(dtMs);
-        if (event.attackFired && event.pattern) {
-          totalEnemyShotsFired += spawnBossAttack(event.pattern, width);
+        if (event.attackFired && event.pattern && event.phase) {
+          totalEnemyShotsFired += spawnBossAttack(event.pattern, event.phase, width, height);
         }
       }
 
@@ -2703,6 +2720,11 @@ function createAmpInvadersStage(): StageRuntime {
       lastSpecialKind = specialsState.lastSpawnKind;
 
       for (const bullet of bullets) {
+        if (bullet.enemy && bullet.kind === "seeker") {
+          const desiredVx = Math.max(-280, Math.min(280, (playerX * width - bullet.x) * 1.6));
+          const steerBlend = Math.min(1, (dtMs / 180) * (bullet.steerStrength ?? 1));
+          bullet.vx += (desiredVx - bullet.vx) * steerBlend;
+        }
         bullet.x += bullet.vx * (dtMs / 1000);
         bullet.y += bullet.vy * (dtMs / 1000);
       }
@@ -2962,11 +2984,39 @@ function createAmpInvadersStage(): StageRuntime {
         context.font = "12px monospace";
         context.fillText(`BOSS P${bossState.phase}`, bossX - 34, bossY + 18);
         if (bossState.telegraphActive) {
-          context.strokeStyle = withAlpha("#ff4a4a", 0.9);
-          context.beginPath();
-          context.moveTo(0, bossY + 36);
-          context.lineTo(width, bossY + 36);
-          context.stroke();
+          if (bossState.telegraphPattern === "verticalLaser") {
+            const columns = getBossLaserColumns({
+              width,
+              bossX,
+              playerX: playerX * width,
+              phase: bossState.phase
+            });
+            context.strokeStyle = withAlpha("#ff6a82", 0.9);
+            context.lineWidth = 2;
+            for (const x of columns) {
+              context.beginPath();
+              context.moveTo(x, 18);
+              context.lineTo(x, height - 64);
+              context.stroke();
+            }
+          } else if (bossState.telegraphPattern === "seekerSwarm") {
+            context.strokeStyle = withAlpha("#ffc96f", 0.92);
+            context.lineWidth = 2;
+            const targetY = height - 78;
+            const offsets = [-52, 0, 52];
+            for (const offset of offsets) {
+              context.beginPath();
+              context.moveTo(bossX + offset, bossY + 24);
+              context.lineTo(playerX * width + offset * 0.35, targetY);
+              context.stroke();
+            }
+          } else {
+            context.strokeStyle = withAlpha("#ff4a4a", 0.9);
+            context.beginPath();
+            context.moveTo(0, bossY + 36);
+            context.lineTo(width, bossY + 36);
+            context.stroke();
+          }
         }
       }
 
@@ -2975,6 +3025,24 @@ function createAmpInvadersStage(): StageRuntime {
       const enemyBulletSprite = ampBulletImages[bulletSpriteKeys.enemy];
       const waveCycleForBulletSprites = getWaveCycleForSprites(wave);
       bullets.forEach((bullet) => {
+        if (bullet.enemy && bullet.kind === "laser") {
+          context.fillStyle = withAlpha("#ff547a", 0.45);
+          context.fillRect(bullet.x - 3, bullet.y - 20, 6, 40);
+          context.fillStyle = withAlpha("#ffe3ec", 0.92);
+          context.fillRect(bullet.x - 1, bullet.y - 24, 2, 48);
+          return;
+        }
+        if (bullet.enemy && bullet.kind === "seeker") {
+          context.fillStyle = withAlpha("#ffb74d", 0.42);
+          context.beginPath();
+          context.arc(bullet.x, bullet.y, 8, 0, Math.PI * 2);
+          context.fill();
+          context.fillStyle = withAlpha("#ffdba8", 0.95);
+          context.beginPath();
+          context.arc(bullet.x, bullet.y, 4, 0, Math.PI * 2);
+          context.fill();
+          return;
+        }
         const sprite = bullet.enemy ? enemyBulletSprite : playerBulletSprite;
         const canDrawBulletSprite = sprite.complete && sprite.naturalWidth > 0 && sprite.naturalHeight > 0;
         if (canDrawBulletSprite) {
@@ -3059,6 +3127,7 @@ function createAmpInvadersStage(): StageRuntime {
         bossPhase: boss.phase,
         bossHp: boss.hp,
         bossTelegraph: boss.telegraphActive,
+        bossTelegraphPattern: boss.telegraphPattern,
         playerX,
         controlTelemetry: {
           touchSteerActive,
@@ -3681,7 +3750,19 @@ function injectStyles(): void {
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    #hud-time {
+      display: flex;
+      align-items: center;
+      line-height: 1;
+      font-family: var(--font-mono), "JetBrains Mono", "Consolas", monospace;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.06em;
+    }
     .hud-stage {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      line-height: 1;
       justify-self: end;
     }
     .canvas-wrap {
@@ -4134,6 +4215,9 @@ function injectStyles(): void {
       .hud-item {
         font-size: 12px;
         letter-spacing: 0.02em;
+      }
+      #hud-time {
+        letter-spacing: 0.04em;
       }
       .stage-meta {
         font-size: 10px;
