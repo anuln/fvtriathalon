@@ -82,6 +82,10 @@ function parseNonNegativeInt(value: unknown): number | null {
 }
 
 function parseBody(body: unknown): Record<string, unknown> {
+  if (body instanceof Uint8Array) {
+    const text = new TextDecoder().decode(body);
+    return parseBody(text);
+  }
   if (body && typeof body === "object") {
     return body as Record<string, unknown>;
   }

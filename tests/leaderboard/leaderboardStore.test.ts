@@ -81,4 +81,27 @@ describe("leaderboard store", () => {
     );
     expect(topScores()[0]?.player).toBe("ABC");
   });
+
+  it("falls back to local cache in localhost dev when api route is unavailable", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: "Not found" })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { submitScore, topScores } = await import("../../src/leaderboard/leaderboardStore");
+    const submitted = await submitScore({
+      initials: "dev",
+      splits: [100, 200, 300],
+      total: 600
+    });
+
+    expect(submitted).toBe(true);
+    expect(topScores()[0]).toEqual({
+      player: "DEV",
+      total: 600,
+      splits: [100, 200, 300]
+    });
+  });
 });

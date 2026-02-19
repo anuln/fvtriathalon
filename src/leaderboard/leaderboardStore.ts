@@ -88,6 +88,14 @@ function setEntries(next: LeaderboardEntry[]): void {
     .slice(0, MAX_ENTRIES);
 }
 
+function isLocalDevHost(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1";
+}
+
 export function saveScore(entry: LeaderboardEntry): void {
   hydrate();
   setEntries([...entries, entry]);
@@ -112,6 +120,9 @@ export async function refreshScores(limit = API_LIMIT): Promise<LeaderboardEntry
       }
     });
     if (!response.ok) {
+      if (response.status === 404 && isLocalDevHost()) {
+        return topScores();
+      }
       return topScores();
     }
     const payload = (await response.json()) as { entries?: ApiLeaderboardEntry[] };
@@ -137,6 +148,11 @@ export async function submitScore(input: SubmitScoreInput): Promise<boolean> {
   if (typeof fetch !== "function") {
     return false;
   }
+  const localEntry: LeaderboardEntry = {
+    player: initials,
+    total,
+    splits: [stage1, stage2, stage3]
+  };
   try {
     const response = await fetch(API_URL, {
       method: "POST",
@@ -152,6 +168,11 @@ export async function submitScore(input: SubmitScoreInput): Promise<boolean> {
       })
     });
     if (!response.ok) {
+      if (response.status === 404 && isLocalDevHost()) {
+        setEntries([localEntry, ...entries]);
+        persist();
+        return true;
+      }
       return false;
     }
     const payload = (await response.json()) as { entry?: ApiLeaderboardEntry };
@@ -162,6 +183,11 @@ export async function submitScore(input: SubmitScoreInput): Promise<boolean> {
     persist();
     return true;
   } catch {
+    if (isLocalDevHost()) {
+      setEntries([localEntry, ...entries]);
+      persist();
+      return true;
+    }
     return false;
   }
 }
