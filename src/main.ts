@@ -40,6 +40,7 @@ import {
 import { createWaveDirectorV2 } from "./games/amp-invaders/waveDirectorV2";
 import { createEnemyDirector } from "./games/amp-invaders/enemyDirector";
 import { createBossDirector } from "./games/amp-invaders/bossDirector";
+import { computeEnemyDropDelta, getEnemyInvasionFloorY } from "./games/amp-invaders/invasionBounds";
 import { formatAmpLivesHearts } from "./games/amp-invaders/livesHud";
 import { createSpecialsState, updateSpecials } from "./games/amp-invaders/specials";
 import { shouldEnterBossOnWaveClear } from "./games/amp-invaders/stageFlow";
@@ -2472,10 +2473,6 @@ function createAmpInvadersStage(): StageRuntime {
     lastFormationFitWidth = width;
   }
 
-  function stageBottomReached(height: number): boolean {
-    return aliveEnemies().some((enemy) => enemy.y > height - 120);
-  }
-
   function spawnEnemyFirePattern(
     plan: { shots: number; pattern: "single" | "dual" | "burst"; speedScale: number },
     shooters: Enemy[],
@@ -2616,14 +2613,29 @@ function createAmpInvadersStage(): StageRuntime {
         const alive = aliveEnemies();
         const minX = Math.min(...alive.map((enemy) => enemy.x));
         const maxX = Math.max(...alive.map((enemy) => enemy.x));
+        const maxY = Math.max(...alive.map((enemy) => enemy.y));
+        const invasionFloorY = getEnemyInvasionFloorY(height);
+        const descentStep = computeEnemyDropDelta(maxY, 16, invasionFloorY);
         if (Number.isFinite(minX) && Number.isFinite(maxX)) {
           const edgePad = Math.max(20, Math.min(44, Math.floor(width * 0.08)));
           if (minX < edgePad && enemyDir < 0) {
             enemyDir = 1;
-            enemies.forEach((enemy) => (enemy.y += 16));
+            if (descentStep > 0) {
+              enemies.forEach((enemy) => {
+                if (enemy.alive) {
+                  enemy.y += descentStep;
+                }
+              });
+            }
           } else if (maxX > width - edgePad && enemyDir > 0) {
             enemyDir = -1;
-            enemies.forEach((enemy) => (enemy.y += 16));
+            if (descentStep > 0) {
+              enemies.forEach((enemy) => {
+                if (enemy.alive) {
+                  enemy.y += descentStep;
+                }
+              });
+            }
           }
         }
 
@@ -2814,9 +2826,7 @@ function createAmpInvadersStage(): StageRuntime {
         }
       }
 
-      if (!inBoss && stageBottomReached(height)) {
-        dead = true;
-      }
+      // Stage 3 should be resolved by lives + bullet collisions, not by formation touching bottom.
     },
     draw(context, width, height, theme, pulse) {
       const stagePalettes: Record<typeof genre, { top: string; bottom: string; line: string }> = {
