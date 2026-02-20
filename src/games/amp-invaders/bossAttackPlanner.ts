@@ -113,12 +113,12 @@ export function planBossProjectiles(input: BossAttackPlanInput): BossProjectileS
   }
 
   // seekerSwarm
-  const offsets = phase >= 3 ? [-96, -36, 36, 96] : [-64, 0, 64];
+  const offsets = phase >= 3 ? [-84, 0, 84] : [-52, 52];
   return offsets.map((offset) => ({
     x: clamp(bossX + offset, 24, width - 24),
     y,
     vx: offset * 0.85,
-    vy: phase >= 3 ? 250 : 220,
+    vy: phase >= 3 ? 235 : 205,
     damage: 1,
     kind: "seeker"
   }));

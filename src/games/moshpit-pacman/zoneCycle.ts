@@ -19,6 +19,6 @@ export function computeZoneCompletionBonus(zoneTileCount: number, completionCoun
   const totalTiles = Math.max(1, zoneTileCount);
   const repeats = Math.max(0, completionCount);
   const decay = ZONE_REPEAT_DECAY[Math.min(ZONE_REPEAT_DECAY.length - 1, repeats)] ?? 0.45;
-  const base = 28 + totalTiles * 1.15;
+  const base = 26 + totalTiles * 1.08;
   return Math.max(24, Math.round(base * decay));
 }

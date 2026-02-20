@@ -12,8 +12,19 @@ describe("bossAttackPlanner", () => {
     expect(cols.some((x) => Math.abs(x - 740) <= 24)).toBe(true);
   });
 
-  it("plans seeker swarm as homing minions", () => {
-    const bullets = planBossProjectiles({
+  it("uses reduced seeker counts for phase 2 and phase 3 swarms", () => {
+    const phase2Seekers = planBossProjectiles({
+      pattern: "seekerSwarm",
+      phase: 2,
+      width: 960,
+      height: 540,
+      bossX: 480,
+      bossY: 84,
+      playerX: 410
+    }).filter((item) => item.kind === "seeker");
+    expect(phase2Seekers.length).toBe(2);
+
+    const phase3Seekers = planBossProjectiles({
       pattern: "seekerSwarm",
       phase: 3,
       width: 960,
@@ -21,9 +32,8 @@ describe("bossAttackPlanner", () => {
       bossX: 480,
       bossY: 84,
       playerX: 410
-    });
-    const seekerKinds = bullets.filter((item) => item.kind === "seeker");
-    expect(seekerKinds.length).toBeGreaterThanOrEqual(3);
+    }).filter((item) => item.kind === "seeker");
+    expect(phase3Seekers.length).toBe(3);
   });
 
   it("uses vertical laser projectiles for the laser attack", () => {

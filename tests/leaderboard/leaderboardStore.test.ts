@@ -30,7 +30,7 @@ beforeEach(() => {
 describe("leaderboard store", () => {
   it("hydrates from local storage and can refresh from api", async () => {
     installStorage({
-      "festiverse.v1.leaderboard": JSON.stringify([
+      "festiverse.v2.leaderboard": JSON.stringify([
         { player: "OLD", total: 1000, splits: [300, 300, 400] }
       ])
     });

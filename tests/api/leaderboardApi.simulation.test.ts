@@ -47,7 +47,9 @@ vi.mock("pg", () => {
       }
       if (sql.includes("from public.leaderboard_entries") && sql.includes("order by total desc, created_at asc")) {
         const limit = Math.max(1, Number(params[0] ?? 200));
+        const resetAt = typeof params[1] === "string" ? params[1] : "1970-01-01T00:00:00.000Z";
         const ranked = [...rows]
+          .filter((row) => row.created_at >= resetAt)
           .sort((a, b) => {
             if (b.total !== a.total) {
               return b.total - a.total;
@@ -115,6 +117,7 @@ describe("leaderboard api simulation", () => {
   beforeEach(async () => {
     vi.resetModules();
     process.env.DATABASE_URL = "postgres://demo:demo@db.example.com:5432/demo";
+    process.env.LEADERBOARD_RESET_AT = "2026-02-01T00:00:00.000Z";
     const pg = (await import("pg")) as unknown as { __resetMockDb?: () => void };
     pg.__resetMockDb?.();
   });

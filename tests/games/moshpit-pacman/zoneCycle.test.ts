@@ -3,8 +3,8 @@ import { ZONE_LEVEL_STEP, computeZoneCompletionBonus, zonesReadyForRespawn } fro
 
 describe("computeZoneCompletionBonus", () => {
   it("awards a moderate first-clear bonus scaled by zone size", () => {
-    expect(computeZoneCompletionBonus(21, 0)).toBe(52);
-    expect(computeZoneCompletionBonus(55, 0)).toBe(91);
+    expect(computeZoneCompletionBonus(21, 0)).toBe(49);
+    expect(computeZoneCompletionBonus(55, 0)).toBe(85);
   });
 
   it("decays bonus on repeated zone clears to prevent score skew", () => {

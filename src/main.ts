@@ -1,7 +1,18 @@
 import { computeFinalScore, computeStageScore } from "./domain/scoring";
+import { getHapticPattern, shouldTriggerHaptic, supportsHaptics, type HapticKind } from "./domain/haptics";
 import { getStageBeatPulse } from "./domain/beatPulse";
 import { computeRhythmSerpentGrid } from "./domain/rhythmSerpentLayout";
 import { getStageIcon, getTotalScoreIcon } from "./domain/stageIcons";
+import {
+  computeAmpBossDefeatBonus,
+  computeAmpBossEntryBonus,
+  computeAmpBossPhaseBreakBonus,
+  computeAmpEnemyDefeatScore,
+  computeAmpWaveClearBonus,
+  computeSnakeFoodScore,
+  computeSnakeLengthMilestoneBonus,
+  computeSnakeSustainBonus
+} from "./domain/stageScoreTuning";
 import {
   classifyTouchGesture,
   getMobileInputProfile,
@@ -122,6 +133,7 @@ type StageRuntime = {
   debugState: () => unknown;
   forceWaveClearForTest?: () => void;
   forceBossDefeatForTest?: () => void;
+  wasBossDefeated?: () => boolean;
 };
 
 const STAGE_IDS: StageId[] = ["rhythm-serpent", "moshpit-pacman", "amp-invaders"];
@@ -256,6 +268,8 @@ const audio = createAudioEngine();
 let flow: FlowState = createFlowState();
 let mode: Mode = DESKTOP_GATE_ACTIVE ? "desktopGate" : "boot";
 let runActive = false;
+let completedAllStages = false;
+let bossDefeatedForRun = false;
 let globalElapsedMs = 0;
 let stageAttemptStartMs = 0;
 let stage: StageRuntime = createStage(flow.currentStageIndex);
@@ -275,6 +289,7 @@ let leaderboardReturnMode: Exclude<Mode, "leaderboard"> = mode;
 let frameWidth = 960;
 let frameHeight = 540;
 let lastOverlayMarkup = "";
+let lastHapticTriggeredAtMs = -10_000;
 
 let secretArmed = false;
 let secretTapCount = 0;
@@ -401,6 +416,8 @@ overlay.addEventListener("click", (event) => {
   } else if (action === "play-again") {
     mode = "boot";
     runActive = false;
+    completedAllStages = false;
+    bossDefeatedForRun = false;
     submittedScore = false;
     lastSubmittedInitials = "";
     scoreSubmitPending = false;
@@ -518,6 +535,18 @@ function readMoshPitCrowdSaveLives(activeStage: StageRuntime): number | null {
     return null;
   }
   return Math.max(0, Math.round(chargesRaw));
+}
+
+function triggerHaptic(kind: HapticKind): void {
+  if (!supportsHaptics(navigator)) {
+    return;
+  }
+  const now = performance.now();
+  if (!shouldTriggerHaptic(lastHapticTriggeredAtMs, now)) {
+    return;
+  }
+  lastHapticTriggeredAtMs = now;
+  navigator.vibrate(getHapticPattern(kind));
 }
 
 function parseSnakeAudioState(value: unknown): SnakeAudioState | null {
@@ -757,7 +786,6 @@ function syncOverlay(): void {
     `;
   } else if (mode === "results") {
     const summary = finalScoreSummary();
-    const initials = sanitizeInitials(initialsDraft);
     const submitCta = scoreSubmitPending
       ? resultsCopy.submitPendingCta
       : submittedScore
@@ -774,6 +802,11 @@ function syncOverlay(): void {
         <h2>${resultsCopy.title}</h2>
         <p class="score"><span class="score-icon">${getTotalScoreIcon()}</span>${summary.totalScore}</p>
         <p class="bonus-line"><span>${resultsCopy.timeBonusLabel}</span><strong>+${summary.timeBonus}</strong></p>
+        ${
+          summary.highSkillBonus > 0
+            ? `<p class="bonus-line"><span>${resultsCopy.highSkillBonusLabel}</span><strong>+${summary.highSkillBonus}</strong></p>`
+            : ""
+        }
         <ul class="emoji-split-list">${emojiSplits}</ul>
         <label class="initials-entry">
           <span>${resultsCopy.initialsLabel}</span>
@@ -785,7 +818,6 @@ function syncOverlay(): void {
             autocapitalize="characters"
             autocomplete="off"
             spellcheck="false"
-            value="${initials}"
             placeholder="AAA"
           />
           <small>${resultsCopy.initialsHint}</small>
@@ -846,8 +878,23 @@ function syncOverlay(): void {
   if (markup !== lastOverlayMarkup) {
     overlay.innerHTML = markup;
     lastOverlayMarkup = markup;
+    syncResultsInitialsInput();
   }
   overlay.classList.toggle("is-interactive", markup.trim().length > 0);
+}
+
+function syncResultsInitialsInput(): void {
+  if (mode !== "results") {
+    return;
+  }
+  const field = overlay.querySelector<HTMLInputElement>('input[data-field="initials"]');
+  if (!field) {
+    return;
+  }
+  const next = sanitizeInitials(initialsDraft);
+  if (field.value !== next) {
+    field.value = next;
+  }
 }
 
 function syncAdminPanel(): void {
@@ -890,6 +937,8 @@ function startRun(): void {
   }
 
   flow = createFlowState();
+  completedAllStages = false;
+  bossDefeatedForRun = false;
   globalElapsedMs = 0;
   stageAttemptStartMs = 0;
   runActive = true;
@@ -940,8 +989,11 @@ function commitCurrentStage(skipTransition: boolean): void {
 
   advanceStage(flow, stageScore);
   audio.trigger("commit");
+  triggerHaptic("stage-clear");
 
   if (fromIndex >= STAGE_IDS.length - 1) {
+    completedAllStages = true;
+    bossDefeatedForRun = stage.wasBossDefeated?.() === true;
     runActive = false;
     mode = "results";
     return;
@@ -967,6 +1019,8 @@ function forceEndRunByClock(): void {
   flow.stageRaw = raw;
   flow.bankedRaw[flow.currentStageIndex] = raw;
   flow.bankedTri[flow.currentStageIndex] = stageScore;
+  completedAllStages = false;
+  bossDefeatedForRun = false;
   runActive = false;
   mode = "results";
 }
@@ -979,8 +1033,11 @@ function runMsLeft(): number {
   return Math.max(0, RUN_TOTAL_MS - globalElapsedMs);
 }
 
-function finalScoreSummary(): { baseScore: number; timeBonus: number; totalScore: number } {
-  return computeFinalScore(flow.bankedTri, runMsLeft());
+function finalScoreSummary(): { baseScore: number; timeBonus: number; highSkillBonus: number; totalScore: number } {
+  return computeFinalScore(flow.bankedTri, runMsLeft(), {
+    completedAllStages,
+    bossDefeated: bossDefeatedForRun
+  });
 }
 
 async function submitCurrentRunScore(): Promise<void> {
@@ -1215,8 +1272,7 @@ function createRhythmSerpentStage(): StageRuntime {
       enqueueTurnInputs(input);
 
       while (stageMs >= nextSurvivalBonusMs) {
-        const sustainBonus = Math.max(18, 18 + Math.floor((snake.length - 3) * 2.8) + combo * 2);
-        addScore(sustainBonus);
+        addScore(computeSnakeSustainBonus(snake.length, combo));
         nextSurvivalBonusMs += 9_000;
       }
 
@@ -1294,12 +1350,9 @@ function createRhythmSerpentStage(): StageRuntime {
         if (ateFood) {
           combo = Math.max(1, combo + 1);
           comboTimerMs = 3000;
-          const mult = combo >= 8 ? 2.5 : combo >= 5 ? 2 : combo >= 3 ? 1.5 : 1;
-          const baseFoodScore = 22 + combo * 2;
-          const lengthBoost = 1 + Math.max(0, snake.length - 3) * 0.1;
-          addScore(Math.round(baseFoodScore * mult * lengthBoost));
+          addScore(computeSnakeFoodScore(snake.length, combo));
           if (snake.length >= nextLengthMilestone) {
-            addScore(nextLengthMilestone * 16);
+            addScore(computeSnakeLengthMilestoneBonus(nextLengthMilestone));
             nextLengthMilestone += 3;
           }
           audio.trigger("pickup");
@@ -1814,9 +1867,9 @@ function createMoshPitPacmanStage(): StageRuntime {
     const zone = zoneIndex(x, y);
     zoneCollected[zone] += 1;
     if (cell === ".") {
-      score += 12;
+      score += 11;
     } else {
-      score += 55;
+      score += 52;
       frightMs = 4200;
       guardChain = 0;
     }
@@ -1913,7 +1966,7 @@ function createMoshPitPacmanStage(): StageRuntime {
 
       if (totalZoneCompletions % ZONE_LEVEL_STEP === 0) {
         level += 1;
-        score += 90;
+        score += 84;
       }
     }
   }
@@ -1943,13 +1996,14 @@ function createMoshPitPacmanStage(): StageRuntime {
       if (guard.x !== player.x || guard.y !== player.y) continue;
       if (frightMs > 0) {
         guardChain += 1;
-        score += 140 * Math.pow(2, Math.min(2, guardChain - 1));
+        score += 130 * Math.pow(2, Math.min(2, guardChain - 1));
         audio.trigger("pickup");
         guard.x = guard.homeX;
         guard.y = guard.homeY;
         guard.dir = guard.homeDir;
       } else if (crowdSaveCharges > 0) {
         crowdSaveCharges -= 1;
+        triggerHaptic("life-spent");
         crowdSaveInvulnMs = 1400;
         zoneCompletionFlashMs = 700;
         audio.trigger("zone");
@@ -2638,7 +2692,7 @@ function createAmpInvadersStage(): StageRuntime {
       damage: item.damage,
       enemy: true,
       kind: item.kind,
-      steerStrength: item.kind === "seeker" ? (phase >= 3 ? 1.45 : 1.05) : undefined
+      steerStrength: item.kind === "seeker" ? (phase >= 3 ? 1.28 : 0.88) : undefined
     }));
     bullets.push(...spawned);
     return spawned.length;
@@ -2842,6 +2896,7 @@ function createAmpInvadersStage(): StageRuntime {
           }
           if (hit.playerHit) {
             lives -= 1;
+            triggerHaptic("life-spent");
             if (lives <= 0) {
               dead = true;
             }
@@ -2857,7 +2912,7 @@ function createAmpInvadersStage(): StageRuntime {
               bullet.y = -100;
               if (enemy.hp <= 0) {
                 enemy.alive = false;
-                score += enemy.type === "elite" ? 40 : enemy.type === "armored" ? 18 : 8;
+                score += computeAmpEnemyDefeatScore(enemy.type, wave);
                 audio.trigger("pickup");
               }
               break;
@@ -2867,11 +2922,18 @@ function createAmpInvadersStage(): StageRuntime {
           if (inBoss) {
             const inBossHitbox = Math.abs(bullet.x - bossX) < 66 && Math.abs(bullet.y - bossY) < 38;
             if (inBossHitbox) {
+              const phaseBeforeHit = bossDirector.getState().phase;
               bossDirector.applyDamage(Math.max(1, bullet.damage));
+              const phaseAfterHit = bossDirector.getState().phase;
               bullet.y = -120;
+              if (phaseAfterHit > phaseBeforeHit) {
+                if (phaseAfterHit === 2 || phaseAfterHit === 3) {
+                  score += computeAmpBossPhaseBreakBonus(phaseAfterHit);
+                }
+              }
               if (bossDirector.isDefeated() && !bossDefeatAwarded) {
                 bossDefeatAwarded = true;
-                score += 480;
+                score += computeAmpBossDefeatBonus();
                 cleared = true;
               }
             }
@@ -2905,6 +2967,7 @@ function createAmpInvadersStage(): StageRuntime {
           special.consumed = true;
         } else if (hit.playerHit) {
           lives -= 1;
+          triggerHaptic("life-spent");
           if (lives <= 0) {
             dead = true;
           }
@@ -2919,6 +2982,7 @@ function createAmpInvadersStage(): StageRuntime {
       }
 
       if (!inBoss && aliveEnemies().length === 0) {
+        const clearedWave = wave;
         if (shouldEnterBossOnWaveClear(wave, STAGE3_V2_DEFAULT_CONFIG.boss.entryWave)) {
           waveState = waveDirector.advanceOnWaveClear();
           wave = waveState.wave;
@@ -2933,14 +2997,14 @@ function createAmpInvadersStage(): StageRuntime {
           bossDirector.enter();
           specialsState.entities.length = 0;
           enemyFireCooldownMs = 420;
-          score += 160;
+          score += computeAmpBossEntryBonus(clearedWave);
         } else {
           waveState = waveDirector.advanceOnWaveClear();
           wave = waveState.wave;
           genre = waveState.genre;
           spreadTier = waveState.spreadTier;
           nextUpgradeWave = waveState.nextUpgradeWave;
-          score += 70;
+          score += computeAmpWaveClearBonus(clearedWave);
           enemies = spawnWave(wave);
           enemyDir = 1;
         }
@@ -3194,6 +3258,9 @@ function createAmpInvadersStage(): StageRuntime {
     },
     isCleared() {
       return cleared;
+    },
+    wasBossDefeated() {
+      return bossDefeatAwarded;
     },
     getHudHint() {
       if (inBoss) {
@@ -5386,8 +5453,11 @@ function renderGameToText(): string {
     stageScore: Math.round(flow.stageRaw),
     totalScore: totalBankedScore(),
     timeBonus: summary.timeBonus,
+    highSkillBonus: summary.highSkillBonus,
     finalScore: summary.totalScore,
     totalTri: totalBankedScore(),
+    completedAllStages,
+    bossDefeatedForRun,
     theme: activeTheme.id,
     stageState: stage.debugState(),
     audioState: audio.debugState?.()

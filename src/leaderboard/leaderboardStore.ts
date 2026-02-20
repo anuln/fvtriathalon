@@ -33,7 +33,7 @@ type ApiErrorPayload = {
 
 const MAX_ENTRIES = 20;
 const API_LIMIT = 200;
-const STORAGE_KEY = "festiverse.v1.leaderboard";
+const STORAGE_KEY = "festiverse.v2.leaderboard";
 const API_URL = "/api/leaderboard";
 
 let entries: LeaderboardEntry[] = [];

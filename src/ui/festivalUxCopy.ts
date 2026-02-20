@@ -36,6 +36,7 @@ export const resultsCopy = {
   playAgainCta: "RUN AGAIN",
   stageTotalLabel: "SET TOTAL",
   timeBonusLabel: "TIME HYPE BONUS",
+  highSkillBonusLabel: "HEADLINER CLEAR BONUS",
   finalLabel: "FINAL"
 } as const;
 

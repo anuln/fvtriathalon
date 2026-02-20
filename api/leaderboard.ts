@@ -36,6 +36,8 @@ const CONNECTION_ENV_KEYS = [
   "SUPABASE_POOLER_TRANSACTION_URL"
 ] as const;
 
+const LEADERBOARD_RESET_AT_ISO = process.env.LEADERBOARD_RESET_AT || "2026-02-20T12:30:00.000Z";
+
 function resolveConnectionSpec(): ConnectionSpec {
   for (const key of CONNECTION_ENV_KEYS) {
     const value = process.env[key];
@@ -226,6 +228,7 @@ function buildStorageUnavailablePayload(error: unknown): Record<string, unknown>
     detail: errorDetail(error),
     connectionSource: connectionSpec.source,
     tlsMode,
+    resetAt: LEADERBOARD_RESET_AT_ISO,
     hint: `Configure one of: ${CONNECTION_ENV_KEYS.join(", ")}`
   };
 }
@@ -239,6 +242,7 @@ async function sendDebugSnapshot(res: JsonResponse): Promise<void> {
       connectionSource: null,
       tlsMode: "not-configured",
       schemaReady,
+      resetAt: LEADERBOARD_RESET_AT_ISO,
       hint: `Configure one of: ${CONNECTION_ENV_KEYS.join(", ")}`
     });
     return;
@@ -254,6 +258,7 @@ async function sendDebugSnapshot(res: JsonResponse): Promise<void> {
       connectionSource: connectionSpec.source,
       tlsMode: shouldUseSsl(connectionString) ? "sslmode=no-verify" : "ssl-disabled",
       schemaReady,
+      resetAt: LEADERBOARD_RESET_AT_ISO,
       pingOk: pingResult.rows[0]?.ok === 1,
       tableExists
     });
@@ -264,6 +269,7 @@ async function sendDebugSnapshot(res: JsonResponse): Promise<void> {
       connectionSource: connectionSpec.source,
       tlsMode: shouldUseSsl(connectionString) ? "sslmode=no-verify" : "ssl-disabled",
       schemaReady,
+      resetAt: LEADERBOARD_RESET_AT_ISO,
       detail: errorDetail(error)
     });
   }
@@ -288,14 +294,16 @@ export default async function handler(req: RequestLike, res: JsonResponse): Prom
   if (req.method === "GET") {
     const parsed = parseNonNegativeInt(readQueryValue(req.query?.limit) || 200);
     const limit = Math.max(1, Math.min(500, parsed ?? 200));
+    const resetAt = LEADERBOARD_RESET_AT_ISO;
 
     try {
       const result = await db.query<LeaderboardRow>(
         `select initials, total, stage1, stage2, stage3, created_at
          from public.leaderboard_entries
+         where created_at >= $2::timestamptz
          order by total desc, created_at asc
          limit $1`,
-        [limit]
+        [limit, resetAt]
       );
       sendJson(res, 200, { entries: result.rows });
     } catch (error) {
